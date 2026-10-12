@@ -606,7 +606,7 @@ test("Settings' token link opens GitHub's token page", async ({ page, context })
   expect((await popupPromise).url()).toBe("https://github.com/settings/tokens");
 });
 
-test("The Download window offers Update for an outdated Decky plugin and hands it to Decky's installer", async ({ page }) => {
+test("An outdated Decky plugin's card offers Update and hands it to Decky's installer", async ({ page }) => {
   // dev-server.py scans .dev-data/plugins/*/plugin.json as the installed
   // Decky plugins, so seed an old MAKO there for the length of this test.
   const pluginDir = new URL("../.dev-data/plugins/e2e-mako/", import.meta.url);
@@ -622,9 +622,7 @@ test("The Download window offers Update for an outdated Decky plugin and hands i
     await page.goto("/?preview=/deckyhub/updates&bridge=http://127.0.0.1:8643");
     const app = mock(page);
     const makoCard = app.getByRole("heading", { name: "MAKO Decky" }).locator("..");
-    await expect(makoCard.getByRole("button", { name: "Update", exact: true })).toHaveCount(0);
-    await makoCard.getByRole("button", { name: "Manage", exact: true }).click();
-    await app.locator(".steam-modal").getByRole("button", { name: "Update", exact: true }).click();
+    await makoCard.getByRole("button", { name: "Update", exact: true }).click();
 
     const frame = page.frames().find((candidate) => candidate !== page.mainFrame())!;
     await expect.poll(() => frame.evaluate(() => (window as unknown as { __installCalls: unknown[][] }).__installCalls)).toEqual([
@@ -702,6 +700,8 @@ test("The Manage window reinstalls or downgrades an installed Decky plugin to th
     await page.goto("/?preview=/deckyhub/discover&bridge=http://127.0.0.1:8643");
     const app = mock(page);
     const makoCard = app.getByRole("heading", { name: "MAKO Decky" }).locator("..");
+    // Absence checks pass on a card whose release hasn't loaded yet, so wait for it first.
+    await expect(makoCard.getByText(/^Latest: /)).not.toHaveText("Latest: —");
     await expect(makoCard.getByRole("button", { name: "Install", exact: true })).toHaveCount(0);
     await makoCard.getByRole("button", { name: "Manage", exact: true }).click();
     const modal = app.locator(".steam-modal");
@@ -735,8 +735,8 @@ test("Unifideck updates by uninstalling first and installing fresh, after a warn
   try {
     await page.goto("/?preview=/deckyhub/discover&bridge=http://127.0.0.1:8643");
     const app = mock(page);
-    await app.getByRole("heading", { name: "Unifideck" }).locator("..").getByRole("button", { name: "Manage", exact: true }).click();
-    await app.locator(".steam-modal").getByRole("button", { name: "Update", exact: true }).click();
+    // The card's quick Update goes through the same warning as the Manage window's.
+    await app.getByRole("heading", { name: "Unifideck" }).locator("..").getByRole("button", { name: "Update", exact: true }).click();
 
     const frame = page.frames().find((candidate) => candidate !== page.mainFrame())!;
     const calls = () => frame.evaluate(() => (window as unknown as { __installCalls: unknown[][] }).__installCalls);
@@ -776,7 +776,7 @@ test("Display Settings can hide the Manage window's buttons", async ({ page }) =
     await expect(app.getByLabel("Hide “Release Page”")).toBeChecked();
 
     modal = await openManage();
-    await expect(modal.getByRole("button", { name: "Check for Updates", exact: true })).toBeVisible();
+    await expect(modal.getByLabel("Version").locator("option").first()).toBeAttached();
     for (const name of ["Install", "Download ZIP", "Release Page"]) await expect(modal.getByRole("button", { name, exact: true })).toHaveCount(0);
     await modal.getByRole("button", { name: "Close", exact: true }).click();
 
@@ -788,7 +788,7 @@ test("Display Settings can hide the Manage window's buttons", async ({ page }) =
     await app.getByRole("button", { name: "Quick Access widget" }).click();
     await app.locator(".qam-content").getByRole("button", { name: /^Update( \(.*\))?$/ }).click();
     modal = app.locator(".steam-modal");
-    await expect(modal.getByRole("button", { name: "Check for Updates", exact: true })).toBeVisible();
+    await expect(modal.getByLabel("Version").locator("option").first()).toBeAttached();
     await expect(modal.getByRole("button", { name: /^(Update to|Reinstall|Downgrade to|Download ZIP|Release Page)/ })).toHaveCount(0);
   } finally {
     await bridgeCall(page, "save_settings", { overwriteExisting: true, updateChannel: "stable", language: "auto", columnsPerRow: 3, githubToken: "" });
