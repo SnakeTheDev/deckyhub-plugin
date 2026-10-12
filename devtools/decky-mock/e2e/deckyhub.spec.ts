@@ -262,8 +262,8 @@ test("DeckyHub automatically notifies about an available update", async ({ page 
   await page.goto("/?bridge=http://127.0.0.1:8643");
   const app = mock(page);
   await expect(app.getByText("DeckyHub: DeckyHub update v9.9.9 is available.")).toBeVisible();
-  await app.getByRole("button", { name: "Update (v9.9.9 available)", exact: true }).click();
-  await expect(app.getByRole("button", { name: "Update to v9.9.9", exact: true })).toBeVisible();
+  await app.locator(".qam-content").getByRole("button", { name: "Update to v9.9.9", exact: true }).click();
+  await expect(app.locator(".steam-modal").getByRole("button", { name: "Update to v9.9.9", exact: true })).toBeVisible();
   await expect(app.getByRole("button", { name: "Release Page", exact: true })).toBeVisible();
 });
 
@@ -360,12 +360,12 @@ test("DeckyHub distinguishes rc versions sharing the same release number", async
   );
   await page.goto("/?bridge=http://127.0.0.1:8643");
   const app = mock(page);
-  await app.getByRole("button", { name: /^Update \(.* available\)$/ }).click();
+  await app.locator(".qam-content").getByRole("button", { name: /^Update to v/ }).click();
 
   // The modal defaults to the channel's newest release (newerRcRelease is
   // versions[0] in the mocked list), not the installed one, so it shows
   // "Update to …" immediately rather than "Reinstall …".
-  await expect(app.getByRole("button", { name: `Update to ${newerRcTag}`, exact: true })).toBeVisible();
+  await expect(app.locator(".steam-modal").getByRole("button", { name: `Update to ${newerRcTag}`, exact: true })).toBeVisible();
 
   await app.getByLabel("Version").selectOption({ label: olderRcTag });
   await expect(app.getByRole("button", { name: `Downgrade to ${olderRcTag}`, exact: true })).toBeVisible();
@@ -397,9 +397,9 @@ test("DeckyHub picks the newest release by publish date even when GitHub returns
   );
   await page.goto("/?bridge=http://127.0.0.1:8643");
   const app = mock(page);
-  await app.getByRole("button", { name: /^Update \(.* available\)$/ }).click();
+  await app.locator(".qam-content").getByRole("button", { name: /^Update to v/ }).click();
 
-  await expect(app.getByRole("button", { name: `Update to ${newerRcTag}`, exact: true })).toBeVisible();
+  await expect(app.locator(".steam-modal").getByRole("button", { name: `Update to ${newerRcTag}`, exact: true })).toBeVisible();
   await expect(app.locator(".steam-modal").getByLabel("Version")).toHaveValue(newerRcRelease.tag_name);
   const options = await app.locator(".steam-modal").getByLabel("Version").locator("option").allTextContents();
   expect(options.find((label) => label.includes("(latest)"))).toBe(`${newerRcTag} (latest)`);
@@ -465,7 +465,7 @@ test("DeckyHub version picker re-filters by channel and leaves the channel as it
   await app.getByLabel("Update Channel").selectOption({ label: "Pre-releases" });
 
   await expect(app.getByLabel("Version")).toHaveValue("v999.0.0-beta");
-  await expect(app.getByRole("button", { name: "Update to v999.0.0-beta", exact: true })).toBeVisible();
+  await expect(app.locator(".steam-modal").getByRole("button", { name: "Update to v999.0.0-beta", exact: true })).toBeVisible();
 
   // changeChannel() persists to the real (shared) settings.json via the dev
   // bridge, fire-and-forget from the UI's perspective — clicking the dropdown
@@ -645,7 +645,7 @@ test("An outdated Decky plugin's card offers Update and hands it to Decky's inst
     await page.goto("/?preview=/deckyhub/updates&bridge=http://127.0.0.1:8643");
     const app = mock(page);
     const makoCard = app.getByRole("heading", { name: "MAKO Decky" }).locator("..");
-    await makoCard.getByRole("button", { name: "Update to latest", exact: true }).click();
+    await makoCard.getByRole("button", { name: "Update to v1.2.3", exact: true }).click();
     // Decky's own dialog takes over, so the page is left.
     await expect(mock(page).locator(".qam-content")).toBeVisible();
 
@@ -691,7 +691,7 @@ test("Discover's card installs the latest release of a Decky plugin that isn't i
   await recordInstalls(page);
   await page.goto("/?preview=/deckyhub/discover&bridge=http://127.0.0.1:8643");
   const makoCard = mock(page).getByRole("heading", { name: "MAKO Decky" }).locator("..");
-  await makoCard.getByRole("button", { name: "Install latest", exact: true }).click();
+  await makoCard.getByRole("button", { name: "Install v1.2.3", exact: true }).click();
   // Decky's own dialog takes over, so the page is left.
   await expect(mock(page).locator(".qam-content")).toBeVisible();
 
@@ -708,7 +708,7 @@ test("A release without a GitHub checksum installs as unverified, with an empty 
   await recordInstalls(page);
   await page.goto("/?preview=/deckyhub/discover&bridge=http://127.0.0.1:8643");
   const makoCard = mock(page).getByRole("heading", { name: "MAKO Decky" }).locator("..");
-  await makoCard.getByRole("button", { name: "Install latest (unverified)", exact: true }).click();
+  await makoCard.getByRole("button", { name: "Install v1.2.3 (unverified)", exact: true }).click();
 
   // Decky Loader skips its SHA-256 check when the hash is empty.
   const frame = page.frames().find((candidate) => candidate !== page.mainFrame())!;
@@ -731,9 +731,9 @@ test("The Manage window reinstalls or downgrades an installed Decky plugin to th
     const makoCard = app.getByRole("heading", { name: "MAKO Decky" }).locator("..");
     // Absence checks pass on a card whose release hasn't loaded yet, so wait for it first.
     await expect(makoCard.getByText(/^Latest: /)).not.toHaveText("Latest: —");
-    await expect(makoCard.getByRole("button", { name: "Install latest", exact: true })).toHaveCount(0);
+    await expect(makoCard.getByRole("button", { name: /^Install v/ })).toHaveCount(0);
     // Up to date, so the card offers no Update either.
-    await expect(makoCard.getByRole("button", { name: "Update to latest", exact: true })).toHaveCount(0);
+    await expect(makoCard.getByRole("button", { name: /^Update to v/ })).toHaveCount(0);
     await makoCard.getByRole("button", { name: "Manage", exact: true }).click();
     const modal = app.locator(".steam-modal");
     await expect(modal.getByRole("button", { name: "Reinstall v1.2.3", exact: true })).toBeVisible();
@@ -767,15 +767,15 @@ test("Unifideck updates by uninstalling first and installing fresh, after a warn
     await page.goto("/?preview=/deckyhub/discover&bridge=http://127.0.0.1:8643");
     const app = mock(page);
     // The card's quick Update goes through the same warning as the Manage window's.
-    await app.getByRole("heading", { name: "Unifideck" }).locator("..").getByRole("button", { name: "Update to latest", exact: true }).click();
+    await app.getByRole("heading", { name: "Unifideck" }).locator("..").getByRole("button", { name: "Update to v0.7.6", exact: true }).click();
 
     const frame = page.frames().find((candidate) => candidate !== page.mainFrame())!;
     const calls = () => frame.evaluate(() => (window as unknown as { __installCalls: unknown[][] }).__installCalls);
     // Nothing reaches Decky until the uninstall-first warning is confirmed.
-    const confirm = app.locator(".steam-modal", { hasText: "Update to latest?" });
+    const confirm = app.locator(".steam-modal", { hasText: "Update to v0.7.6?" });
     await expect(confirm.getByText("removes the installed version first", { exact: false })).toBeVisible();
     expect(await calls()).toEqual([]);
-    await confirm.getByRole("button", { name: "Update to latest", exact: true }).click();
+    await confirm.getByRole("button", { name: "Update to v0.7.6", exact: true }).click();
 
     await expect.poll(calls).toEqual([
       ["utilities/uninstall_plugin", "Unifideck"],
@@ -857,7 +857,7 @@ test("Display Settings can hide the Manage window's buttons", async ({ page }) =
     await app.getByText("Hide “Update”", { exact: true }).click();
     await expect(app.getByLabel("Hide “Update”")).toBeChecked();
     await app.getByRole("button", { name: "Quick Access widget" }).click();
-    await app.locator(".qam-content").getByRole("button", { name: /^(Update \(.*\)|Check for Updates)$/ }).click();
+    await app.locator(".qam-content").getByRole("button", { name: /^(Update to v.*|Check for Updates)$/ }).click();
     modal = app.locator(".steam-modal");
     await expect(modal.getByLabel("Version").locator("option").first()).toBeAttached();
     await expect(modal.getByRole("button", { name: /^(Update to|Reinstall|Downgrade to|Download ZIP|Release Page)/ })).toHaveCount(0);

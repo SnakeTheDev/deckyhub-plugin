@@ -9,7 +9,7 @@ import { compactButtonStyle, latestDeckyHubRelease, log, normalizeVersion, PLUGI
 import { DeckyHubUpdateModal } from "./DeckyHubUpdateModal";
 
 // Deliberately thin: a header naming the installed version and a single
-// button, "Update (vX available)" or "Check for Updates". Everything else (latest version, self-update progress,
+// button, "Update to vX" or "Check for Updates". Everything else (latest version, self-update progress,
 // download-zip fallback, release page, re-check) lives in DeckyHubUpdateModal.
 export function DeckyHubUpdate() {
   const t = useT();
@@ -56,7 +56,7 @@ export function DeckyHubUpdate() {
           // Read settings on open so Display Settings' hidden buttons are current.
           onClick={() => void getSettings().then((settings) => showModal(<DeckyHubUpdateModal t={t} info={info} channel={channel} onCheckUpdate={() => checkForUpdate(true)} onChannelChange={setChannel} hiddenButtons={settings.hiddenButtons} />))}
         >
-          {hasUpdate ? <FaArrowCircleUp /> : <FaSync />} {hasUpdate ? t("settings.updateButtonAvailable", { version: normalizeVersion(release.version!) }) : t("settings.checkUpdate")}
+          {hasUpdate ? <FaArrowCircleUp /> : <FaSync />} {hasUpdate ? t("settings.updateTo", { version: normalizeVersion(release.version!) }) : t("settings.checkUpdate")}
         </Button>
       </PanelSectionRow>
     </PanelSection>

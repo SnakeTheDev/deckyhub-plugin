@@ -34,7 +34,8 @@ export function AppCard({
   const leavePage = () => Navigation.NavigateBack();
   // Blocks a second tap from starting a second install while the first is handed over.
   const [installing, setInstalling] = useState(false);
-  const quickLabel = t(isUpdate ? "appcard.updateLatest" : "appcard.installLatest");
+  const latest = app.latestVersion ? displayVersion(app.latestVersion).replace(/^v/, "") : "";
+  const quickLabel = t(isUpdate ? "settings.updateTo" : "appcard.installVersion", { version: latest });
   return (
     <PanelSection title={app.name}>
       <PanelSectionRow>
