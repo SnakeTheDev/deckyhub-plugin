@@ -177,14 +177,16 @@ export function Content({ fullPage }: { fullPage?: View }) {
   const batchUpdates = view === "updates" && !hiddenButtons.includes("update")
     ? visibleApps.flatMap((app) => {
         const action = app.latestVersion ? installAction(app, { tag: app.latestVersion, assets: app.assets }) : null;
-        return action?.type === PLUGIN_INSTALL_TYPE.UPDATE && !needsFreshInstall(action.name, action.type) ? [{ asset: app.assets[0], name: action.name, version: app.latestVersion! }] : [];
+        return app.updateAvailable === true && action?.type === PLUGIN_INSTALL_TYPE.UPDATE && !needsFreshInstall(action.name, action.type) ? [{ asset: app.assets[0], name: action.name, version: app.latestVersion! }] : [];
       })
     : [];
+  // Decky's own dialog takes over, so leave the page once the request is sent.
   const updateAll = () => {
     setUpdatingAll(true);
     void updateDeckyPlugins(batchUpdates)
       .catch((error: unknown) => toaster.toast({ title: "DeckyHub", body: String(error) }))
       .finally(() => setUpdatingAll(false));
+    Navigation.NavigateBack();
   };
   const pageCount = Math.max(1, Math.ceil(visibleApps.length / CARDS_PER_PAGE));
   const currentPage = Math.min(cardPage, pageCount - 1);

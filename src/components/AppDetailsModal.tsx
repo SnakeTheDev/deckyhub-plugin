@@ -1,5 +1,5 @@
 import { toaster } from "@decky/api";
-import { DialogButtonPrimary as Button, ConfirmModal, ModalRoot, showModal } from "@decky/ui";
+import { DialogButtonPrimary as Button, ConfirmModal, ModalRoot, Navigation, showModal } from "@decky/ui";
 import { useState } from "react";
 import { FaArrowDown, FaArrowUp, FaFileArchive, FaPlus, FaRedo, FaTimes, FaTrash } from "react-icons/fa";
 import { saveRepoSettings } from "../api";
@@ -82,8 +82,12 @@ export function AppDetailsModal({
   const installIcons = { [PLUGIN_INSTALL_TYPE.INSTALL]: <FaPlus />, [PLUGIN_INSTALL_TYPE.REINSTALL]: <FaRedo />, [PLUGIN_INSTALL_TYPE.UPDATE]: <FaArrowUp />, [PLUGIN_INSTALL_TYPE.DOWNGRADE]: <FaArrowDown /> };
   const installLabel = install && selectedRelease ? installTypeLabel(t, install.type, displayVersion(selectedRelease.tag).replace(/^v/, ""), t("appcard.update")) : "";
   const runInstall = (release: AppReleaseOption, action: NonNullable<typeof install>) =>
-    // Decky's own confirm/progress dialog would otherwise open behind this window.
-    void startPluginInstall(t, app.name, release.assets[0], release.tag, action, installLabel, () => closeModal?.());
+    // Decky's own confirm/progress dialog would otherwise open behind this
+    // window; the Updates/Discover page behind it is left too.
+    void startPluginInstall(t, app.name, release.assets[0], release.tag, action, installLabel, () => {
+      closeModal?.();
+      Navigation.NavigateBack();
+    });
 
   // Installed Decky plugins can be removed through Decky Loader — never
   // DeckyHub itself from here. The loader doesn't confirm, so we do.

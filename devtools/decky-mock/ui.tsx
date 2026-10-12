@@ -293,6 +293,8 @@ export function showModal(node: React.ReactElement) {
 
 export const Navigation = {
   Navigate: (path: string) => window.dispatchEvent(new CustomEvent("decky-mock-navigate", { detail: path })),
+  // ponytail: no history; "back" always lands on the Quick Access widget.
+  NavigateBack: () => window.dispatchEvent(new CustomEvent("decky-mock-navigate", { detail: null })),
   NavigateToExternalWeb: (url: string) => window.open(url, "_blank"),
 };
 

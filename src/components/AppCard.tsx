@@ -1,4 +1,4 @@
-import { DialogButtonPrimary as Button, PanelSection, PanelSectionRow, showModal } from "@decky/ui";
+import { DialogButtonPrimary as Button, Navigation, PanelSection, PanelSectionRow, showModal } from "@decky/ui";
 import { useState } from "react";
 import { FaArrowUp, FaCog, FaPlus } from "react-icons/fa";
 import { useT } from "../i18n";
@@ -27,8 +27,11 @@ export function AppCard({
   // Quick install/update to the latest release of a Decky plugin;
   // Manage still offers other versions/channels.
   const install = app.latestVersion ? installAction(app, { tag: app.latestVersion, assets: app.assets }) : null;
-  const isUpdate = install?.type === PLUGIN_INSTALL_TYPE.UPDATE;
+  // Only offer Update when the card's own status says one is available.
+  const isUpdate = install?.type === PLUGIN_INSTALL_TYPE.UPDATE && app.updateAvailable === true;
   const quickAction = install && (isUpdate || install.type === PLUGIN_INSTALL_TYPE.INSTALL) && !hiddenButtons.includes(isUpdate ? "update" : "install");
+  // Installs hand over to Decky's own dialog, so leave the Updates/Discover page.
+  const leavePage = () => Navigation.NavigateBack();
   // Blocks a second tap from starting a second install while the first is handed over.
   const [installing, setInstalling] = useState(false);
   const quickLabel = t(isUpdate ? "appcard.update" : "appcard.install");
@@ -65,7 +68,7 @@ export function AppCard({
             disabled={installing}
             onClick={() => {
               setInstalling(true);
-              void startPluginInstall(t, app.name, app.assets[0], app.latestVersion!, install, quickLabel).finally(() => setInstalling(false));
+              void startPluginInstall(t, app.name, app.assets[0], app.latestVersion!, install, quickLabel, leavePage).finally(() => setInstalling(false));
             }}
           >
             {isUpdate ? <FaArrowUp /> : <FaPlus />} {unverifiedLabel(t, quickLabel, install.verified)}

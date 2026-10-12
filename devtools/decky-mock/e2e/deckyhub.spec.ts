@@ -646,6 +646,8 @@ test("An outdated Decky plugin's card offers Update and hands it to Decky's inst
     const app = mock(page);
     const makoCard = app.getByRole("heading", { name: "MAKO Decky" }).locator("..");
     await makoCard.getByRole("button", { name: "Update", exact: true }).click();
+    // Decky's own dialog takes over, so the page is left.
+    await expect(mock(page).locator(".qam-content")).toBeVisible();
 
     const frame = page.frames().find((candidate) => candidate !== page.mainFrame())!;
     await expect.poll(() => frame.evaluate(() => (window as unknown as { __installCalls: unknown[][] }).__installCalls)).toEqual([
@@ -671,6 +673,8 @@ test("The Manage window offers Install for a Decky plugin that isn't installed y
   await expect(modal.getByLabel("Version").locator("option")).toHaveText(["v1.2.3 (latest)"]);
   await expect(modal.getByRole("button", { name: "Update", exact: true })).toHaveCount(0);
   await modal.getByRole("button", { name: "Install", exact: true }).click();
+  // Decky's own dialog takes over, so the page is left.
+  await expect(mock(page).locator(".qam-content")).toBeVisible();
 
   // A fresh install is named after the registry's first detection name, the
   // plugin's own manifest name, with Decky's INSTALL (0) type.
@@ -688,6 +692,8 @@ test("Discover's card installs the latest release of a Decky plugin that isn't i
   await page.goto("/?preview=/deckyhub/discover&bridge=http://127.0.0.1:8643");
   const makoCard = mock(page).getByRole("heading", { name: "MAKO Decky" }).locator("..");
   await makoCard.getByRole("button", { name: "Install", exact: true }).click();
+  // Decky's own dialog takes over, so the page is left.
+  await expect(mock(page).locator(".qam-content")).toBeVisible();
 
   const frame = page.frames().find((candidate) => candidate !== page.mainFrame())!;
   await expect.poll(() => frame.evaluate(() => (window as unknown as { __installCalls: unknown[][] }).__installCalls)).toEqual([
@@ -726,6 +732,8 @@ test("The Manage window reinstalls or downgrades an installed Decky plugin to th
     // Absence checks pass on a card whose release hasn't loaded yet, so wait for it first.
     await expect(makoCard.getByText(/^Latest: /)).not.toHaveText("Latest: —");
     await expect(makoCard.getByRole("button", { name: "Install", exact: true })).toHaveCount(0);
+    // Up to date, so the card offers no Update either.
+    await expect(makoCard.getByRole("button", { name: "Update", exact: true })).toHaveCount(0);
     await makoCard.getByRole("button", { name: "Manage", exact: true }).click();
     const modal = app.locator(".steam-modal");
     await expect(modal.getByRole("button", { name: "Reinstall v1.2.3", exact: true })).toBeVisible();
@@ -801,6 +809,8 @@ test("Update All sends every outdated Decky plugin to Decky's installer in one r
     const app = mock(page);
     await expect(app.getByRole("heading", { name: "Unifideck" })).toBeVisible();
     await app.getByRole("button", { name: "Update All (2)", exact: true }).click();
+    // Decky's own dialog takes over, so the page is left.
+    await expect(mock(page).locator(".qam-content")).toBeVisible();
 
     const frame = page.frames().find((candidate) => candidate !== page.mainFrame())!;
     const calls = () => frame.evaluate(() => (window as unknown as { __installCalls: unknown[][] }).__installCalls);
