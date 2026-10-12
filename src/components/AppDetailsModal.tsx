@@ -8,6 +8,30 @@ import type { App, AppReleaseOption, Asset, HideableButton, RepoPreference, Upda
 import { buildVersionOptions, displayVersion, getDeckyBackend, installAction, installDeckyPlugin, installTypeLabel, listAppReleases, modalButtonStyle, needsFreshInstall, PLUGIN_INSTALL_TYPE, readableBytes, sectionDividerStyle, uninstallDeckyPlugin, unverifiedLabel, windowGap } from "../utils";
 import { ReleaseActions, useReleasePicker, VersionPickerPanel } from "./VersionPickerPanel";
 
+// Hands one release to Decky Loader's installer, shared by this window and the
+// card's quick Install/Update. installDeckyPlugin() uninstalls fresh-install
+// plugins first, before Decky's own dialog appears, so cancelling that dialog
+// would leave the plugin uninstalled — say so before starting.
+export function startPluginInstall(t: TFunc, appName: string, asset: Asset, tag: string, action: { name: string; type: 0 | 1 | 2 | 3 }, label: string, onStarted?: () => void): Promise<void> {
+  if (!getDeckyBackend()) {
+    toaster.toast({ title: "DeckyHub", body: t("settings.selfUpdateUnavailable") });
+    return Promise.resolve();
+  }
+  // Settles once Decky has the request (its own dialog is up) or it failed.
+  const start = () => {
+    const request = installDeckyPlugin(asset, action.name, tag, action.type).then(
+      () => undefined,
+      (error: unknown) => void toaster.toast({ title: "DeckyHub", body: String(error) }),
+    );
+    onStarted?.();
+    return request;
+  };
+  if (!needsFreshInstall(action.name, action.type)) return start();
+  return new Promise((resolve) =>
+    showModal(<ConfirmModal strTitle={`${label}?`} strDescription={t("appcard.freshInstallDescription", { name: appName })} strOKButtonText={label} onOK={() => void start().then(resolve)} onCancel={() => resolve()} />),
+  );
+}
+
 // showModal() mounts onto a separate root from the caller's tree (see the
 // same note on DeckyHubUpdateModal), so `t` must be a resolved function
 // passed in from AppCard — calling useT() here throws on mount.
@@ -56,30 +80,9 @@ export function AppDetailsModal({
   const install = selectedRelease && installAction(app, selectedRelease);
   const installIcons = { [PLUGIN_INSTALL_TYPE.INSTALL]: <FaPlus />, [PLUGIN_INSTALL_TYPE.REINSTALL]: <FaRedo />, [PLUGIN_INSTALL_TYPE.UPDATE]: <FaArrowUp />, [PLUGIN_INSTALL_TYPE.DOWNGRADE]: <FaArrowDown /> };
   const installLabel = install && selectedRelease ? installTypeLabel(t, install.type, displayVersion(selectedRelease.tag).replace(/^v/, ""), t("appcard.update")) : "";
-  const runInstall = (release: AppReleaseOption, action: NonNullable<typeof install>) => {
-    if (!getDeckyBackend()) {
-      toaster.toast({ title: "DeckyHub", body: t("settings.selfUpdateUnavailable") });
-      return;
-    }
-    const start = () => {
-      installDeckyPlugin(release.assets[0], action.name, release.tag, action.type).catch((error: unknown) =>
-        toaster.toast({ title: "DeckyHub", body: String(error) }),
-      );
-      // Decky's own confirm/progress dialog would otherwise open behind this window.
-      closeModal?.();
-    };
-    if (!needsFreshInstall(action.name, action.type)) return start();
-    // installDeckyPlugin() uninstalls first, before Decky's own dialog appears,
-    // so cancelling that dialog would leave the plugin uninstalled — say so now.
-    showModal(
-      <ConfirmModal
-        strTitle={`${installLabel}?`}
-        strDescription={t("appcard.freshInstallDescription", { name: app.name })}
-        strOKButtonText={installLabel}
-        onOK={start}
-      />,
-    );
-  };
+  const runInstall = (release: AppReleaseOption, action: NonNullable<typeof install>) =>
+    // Decky's own confirm/progress dialog would otherwise open behind this window.
+    void startPluginInstall(t, app.name, release.assets[0], release.tag, action, installLabel, () => closeModal?.());
 
   // Installed Decky plugins can be removed through Decky Loader — never
   // DeckyHub itself from here. The loader doesn't confirm, so we do.

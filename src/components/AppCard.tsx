@@ -1,10 +1,10 @@
-import { toaster } from "@decky/api";
 import { DialogButtonPrimary as Button, PanelSection, PanelSectionRow, showModal } from "@decky/ui";
+import { useState } from "react";
 import { FaArrowUp, FaCog, FaPlus } from "react-icons/fa";
 import { useT } from "../i18n";
 import type { App, Asset, HideableButton, RepoPreference, UpdateChannel } from "../types";
-import { compactButtonStyle, cardDescriptionStyle, displayVersion, installAction, installDeckyPlugin, PLUGIN_INSTALL_TYPE, statusKey, statusColor, unverifiedLabel } from "../utils";
-import { AppDetailsModal } from "./AppDetailsModal";
+import { compactButtonStyle, cardDescriptionStyle, displayVersion, installAction, PLUGIN_INSTALL_TYPE, statusKey, statusColor, unverifiedLabel } from "../utils";
+import { AppDetailsModal, startPluginInstall } from "./AppDetailsModal";
 
 export function AppCard({
   app,
@@ -29,6 +29,9 @@ export function AppCard({
   const install = app.latestVersion ? installAction(app, { tag: app.latestVersion, assets: app.assets }) : null;
   const isUpdate = install?.type === PLUGIN_INSTALL_TYPE.UPDATE;
   const quickAction = install && (isUpdate || install.type === PLUGIN_INSTALL_TYPE.INSTALL) && !hiddenButtons.includes(isUpdate ? "update" : "install");
+  // Blocks a second tap from starting a second install while the first is handed over.
+  const [installing, setInstalling] = useState(false);
+  const quickLabel = t(isUpdate ? "appcard.update" : "appcard.install");
   return (
     <PanelSection title={app.name}>
       <PanelSectionRow>
@@ -55,13 +58,13 @@ export function AppCard({
         <PanelSectionRow>
           <Button
             style={compactButtonStyle}
-            onClick={() =>
-              installDeckyPlugin(app.assets[0], install.name, app.latestVersion!, install.type).catch((error: unknown) =>
-                toaster.toast({ title: "DeckyHub", body: String(error) }),
-              )
-            }
+            disabled={installing}
+            onClick={() => {
+              setInstalling(true);
+              void startPluginInstall(t, app.name, app.assets[0], app.latestVersion!, install, quickLabel).finally(() => setInstalling(false));
+            }}
           >
-            {isUpdate ? <FaArrowUp /> : <FaPlus />} {unverifiedLabel(t, t(isUpdate ? "appcard.update" : "appcard.install"), install.verified)}
+            {isUpdate ? <FaArrowUp /> : <FaPlus />} {unverifiedLabel(t, quickLabel, install.verified)}
           </Button>
         </PanelSectionRow>
       )}
