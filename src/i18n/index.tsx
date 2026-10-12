@@ -39,10 +39,6 @@ function detectLocale(): Locale {
   return "en";
 }
 
-function translate(locale: Locale, key: MessageKey, vars?: Record<string, string | number>) {
-  return substitute(MESSAGES[locale][key], vars);
-}
-
 const I18nContext = createContext<{ locale: Locale; t: TFunc } | null>(null);
 
 export function I18nProvider({ children }: { children: ReactNode }) {
@@ -66,7 +62,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const locale = preference === "auto" ? detectLocale() : isLocale(preference) ? preference : "en";
-  const t: TFunc = (key, vars) => translate(locale, key, vars);
+  const t: TFunc = (key, vars) => substitute(MESSAGES[locale][key], vars);
 
   useEffect(() => setTranslator(t), [locale]);
 

@@ -8,8 +8,6 @@ export type App = {
   description?: string;
   repo: string;
   category: string;
-  source: "releases";
-  versionStrategy: "semver";
   releaseTagInclude?: string;
   asset: { include: string[]; exclude: string[] };
   installedVersion?: string | null;
@@ -44,6 +42,5 @@ export type View = "updates" | "discover";
 
 export type SearchRepo = { full_name: string; description?: string; stargazers_count?: number };
 
-export type ManagedRepo = { repo: string };
 
 export type RepoPreference = { channel: "stable" | "prerelease"; assetFilter: string[] };

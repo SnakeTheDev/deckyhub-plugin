@@ -1,12 +1,13 @@
 import { FileSelectionType, openFilePicker, toaster } from "@decky/api";
 import { DialogButtonPrimary as Button, ConfirmModal, Focusable, PanelSection, PanelSectionRow, showModal, TextField } from "@decky/ui";
 import { FocusableGrid } from "../components/FocusableGrid";
+import { Pager } from "../components/Pager";
 import { RateLimitBanner } from "../components/RateLimitBanner";
 import { useEffect, useState } from "react";
-import { FaArrowLeft, FaArrowRight, FaCheck, FaFileExport, FaFileImport, FaPlus, FaSearch, FaTimes, FaTrash } from "react-icons/fa";
+import { FaCheck, FaFileExport, FaFileImport, FaPlus, FaSearch, FaTimes, FaTrash } from "react-icons/fa";
 import { addCustomRepo, exportCustomRepos, getApps, getCustomRepos, importCustomRepos, REGISTRY_UPDATED, removeCustomRepo } from "../api";
 import { useT } from "../i18n";
-import type { ManagedRepo, SearchRepo } from "../types";
+import type { SearchRepo } from "../types";
 import { compactButtonStyle, githubFetch, githubResponseError, log, sectionDividerStyle } from "../utils";
 
 const RESULTS_PER_PAGE = 5;
@@ -18,7 +19,7 @@ export function ManageRepositoriesPage() {
   const [page, setPage] = useState(0);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
-  const [customRepos, setCustomRepos] = useState<ManagedRepo[]>([]);
+  const [customRepos, setCustomRepos] = useState<string[]>([]);
   const [existingRepos, setExistingRepos] = useState<Set<string>>(new Set());
 
   const refreshRepos = () => {
@@ -119,19 +120,7 @@ export function ManageRepositoriesPage() {
         {searchError && <PanelSectionRow>{searchError}</PanelSectionRow>}
         {results.length > RESULTS_PER_PAGE && (
           <PanelSectionRow>
-            <Focusable flow-children="right" style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <div style={{ flex: 1 }}>
-              <Button style={compactButtonStyle} disabled={page === 0} onClick={() => setPage((current) => current - 1)}>
-                <FaArrowLeft /> {t("repos.previous")}
-              </Button>
-              </div>
-              <span style={{ whiteSpace: "nowrap" }}>{t("repos.pageOf", { page: page + 1, total: Math.ceil(results.length / RESULTS_PER_PAGE) })}</span>
-              <div style={{ flex: 1 }}>
-              <Button style={compactButtonStyle} disabled={(page + 1) * RESULTS_PER_PAGE >= results.length} onClick={() => setPage((current) => current + 1)}>
-                {t("repos.next")} <FaArrowRight />
-              </Button>
-              </div>
-            </Focusable>
+            <Pager page={page} total={Math.ceil(results.length / RESULTS_PER_PAGE)} onChange={setPage} />
           </PanelSectionRow>
         )}
       </PanelSection>
@@ -177,10 +166,10 @@ export function ManageRepositoriesPage() {
             </div>
           </Focusable>
         </PanelSectionRow>
-        {customRepos.map((item) => (
-          <PanelSectionRow key={item.repo}>
-            <Button style={compactButtonStyle} onClick={() => confirmRemove(item.repo)}>
-              <FaTrash /> {t("repos.remove", { repo: item.repo })}
+        {customRepos.map((repo) => (
+          <PanelSectionRow key={repo}>
+            <Button style={compactButtonStyle} onClick={() => confirmRemove(repo)}>
+              <FaTrash /> {t("repos.remove", { repo })}
             </Button>
           </PanelSectionRow>
         ))}

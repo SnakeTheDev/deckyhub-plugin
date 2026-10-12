@@ -55,7 +55,7 @@ def parse_registry(payload: object) -> list[dict]:
     """Validate the portable registry format and ignore malformed records."""
     if not isinstance(payload, dict) or payload.get("schemaVersion") != 1 or not isinstance(payload.get("apps"), list):
         raise ValueError("Unsupported registry format")
-    required = {"id", "name", "repo", "category", "versionStrategy", "source", "asset"}
+    required = {"id", "name", "repo", "category", "asset"}
     return [app for app in payload["apps"] if required <= app.keys() and "/" in app["repo"]]
 
 
@@ -182,7 +182,7 @@ class Plugin:
 
     def _custom_apps(self) -> list[dict]:
         bundled = {app["repo"].casefold() for app in self.apps}
-        return [{"id": f"custom-{repo.replace('/', '-')}", "name": repo, "repo": repo, "category": "Custom", "versionStrategy": "semver", "source": "releases", "detect": {"type": "decky-plugin", "repo": repo}, "asset": {"include": [], "exclude": ["source"]}} for repo in self.settings["customRepos"] if repo.casefold() not in bundled]
+        return [{"id": f"custom-{repo.replace('/', '-')}", "name": repo, "repo": repo, "category": "Custom", "detect": {"type": "decky-plugin", "repo": repo}, "asset": {"include": [], "exclude": ["source"]}} for repo in self.settings["customRepos"] if repo.casefold() not in bundled]
 
     async def get_settings(self):
         return self.settings
@@ -246,7 +246,7 @@ class Plugin:
         return {"added": True, "repo": repo}
 
     async def get_custom_repos(self):
-        return {"repos": [{"repo": repo} for repo in self.settings["customRepos"]]}
+        return {"repos": self.settings["customRepos"]}
 
     async def remove_custom_repo(self, repo: str):
         repo = repo.strip()

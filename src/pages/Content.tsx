@@ -1,7 +1,7 @@
 import { toaster } from "@decky/api";
 import { DialogButtonPrimary as Button, Dropdown, Focusable, Navigation, PanelSection, PanelSectionRow, Spinner, TextField } from "@decky/ui";
 import { useEffect, useRef, useState } from "react";
-import { FaArrowCircleUp, FaArrowLeft, FaArrowRight, FaCog, FaFileExport, FaListUl, FaSearch, FaSync, FaTimes, FaArrowUp } from "react-icons/fa";
+import { FaArrowCircleUp, FaCog, FaFileExport, FaListUl, FaSearch, FaSync, FaTimes, FaArrowUp } from "react-icons/fa";
 import { downloadAsset, exportLogs, getApps, getSettings, REGISTRY_UPDATED } from "../api";
 import { useT } from "../i18n";
 import type { App, Asset, HideableButton, RepoPreference, UpdateChannel, View } from "../types";
@@ -10,6 +10,7 @@ import { AppCard } from "../components/AppCard";
 import { CleanupSection } from "../components/CleanupSection";
 import { showDownloadModal } from "../components/DownloadProgress";
 import { FocusableGrid } from "../components/FocusableGrid";
+import { Pager } from "../components/Pager";
 import { RateLimitBanner } from "../components/RateLimitBanner";
 import { DeckyHubUpdate } from "../components/DeckyHubUpdate";
 
@@ -217,8 +218,8 @@ export function Content({ fullPage }: { fullPage?: View }) {
           <PanelSection title={info.title}>
             <PanelSectionRow>
               <Focusable flow-children="right" style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                {info.description && <div style={{ flex: 1, minWidth: 0 }}>{info.description}</div>}
-                <div style={{ flex: info.description ? "0 0 180px" : 1 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>{info.description}</div>
+                <div style={{ flex: "0 0 180px" }}>
                   <Button style={compactButtonStyle} onClick={() => void load(true)}>
                     <FaSync /> {t("content.refresh")}
                   </Button>
@@ -256,19 +257,7 @@ export function Content({ fullPage }: { fullPage?: View }) {
           {visibleApps.length > CARDS_PER_PAGE && (
             <PanelSection>
               <PanelSectionRow>
-                <Focusable flow-children="right" style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                  <div style={{ flex: 1 }}>
-                    <Button style={compactButtonStyle} disabled={currentPage === 0} onClick={() => setCardPage((current) => current - 1)}>
-                      <FaArrowLeft /> {t("repos.previous")}
-                    </Button>
-                  </div>
-                  <span style={{ whiteSpace: "nowrap" }}>{t("repos.pageOf", { page: currentPage + 1, total: pageCount })}</span>
-                  <div style={{ flex: 1 }}>
-                    <Button style={compactButtonStyle} disabled={currentPage + 1 === pageCount} onClick={() => setCardPage((current) => current + 1)}>
-                      {t("repos.next")} <FaArrowRight />
-                    </Button>
-                  </div>
-                </Focusable>
+                <Pager page={currentPage} total={pageCount} onChange={setCardPage} />
               </PanelSectionRow>
             </PanelSection>
           )}

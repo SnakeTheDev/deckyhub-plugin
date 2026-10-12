@@ -9,7 +9,7 @@ import type { App, AppReleaseOption, Asset, DeckyHubRelease, DeckyHubReleaseOpti
 // every cache read is bypassed by force=true wherever the user explicitly asks
 // to check (Refresh, Check for Updates).
 export const CACHE_TTL = 30 * 60 * 1000;
-export const UPDATE_NOTICE_KEY = "deckyhub-update-notice";
+const UPDATE_NOTICE_KEY = "deckyhub-update-notice";
 export const DEFAULT_COLUMNS_PER_ROW = 3;
 export const pageStyle = { boxSizing: "border-box" as const, height: "100%", overflowY: "auto" as const, padding: "64px 12px 96px", scrollPaddingBottom: 96, scrollPaddingTop: 64, width: "100%" };
 // Sizes read CSS variables that fall back to the Default density; the Compact
@@ -245,7 +245,7 @@ function compareVersions(target: string, current: string): number | null {
 }
 
 export function resolveDeckyHubInstallType(latestVersion: string, installedVersion: string): 1 | 2 | 3 {
-  const cmp = installedVersion === "unknown" ? 1 : compareVersions(latestVersion, installedVersion) ?? 1;
+  const cmp = compareVersions(latestVersion, installedVersion) ?? 1;
   return cmp > 0 ? PLUGIN_INSTALL_TYPE.UPDATE : cmp < 0 ? PLUGIN_INSTALL_TYPE.DOWNGRADE : PLUGIN_INSTALL_TYPE.REINSTALL;
 }
 
@@ -377,7 +377,7 @@ function callDeckyLoader(route: string, ...args: unknown[]) {
 // still be installed; Decky Loader skips verification for an empty hash.
 export function installAction(app: App, release: { tag: string; assets: Asset[] }): { type: 0 | 1 | 2 | 3; name: string } | null {
   if (!release.assets[0]) return null;
-  if (app.pluginName) return { type: resolveDeckyHubInstallType(release.tag, app.installedVersion ?? "unknown"), name: app.pluginName };
+  if (app.pluginName) return { type: resolveDeckyHubInstallType(release.tag, app.installedVersion ?? ""), name: app.pluginName };
   if (!app.installedVersion && app.detect?.type === "decky-plugin") return { type: PLUGIN_INSTALL_TYPE.INSTALL, name: app.detect.names?.[0] ?? app.name };
   return null;
 }
@@ -451,20 +451,22 @@ async function fetchReleases(repo: string, force: boolean): Promise<Release[]> {
   return releases;
 }
 
+// A failed lookup becomes an empty list plus the error, for the caller to show.
+function listOrError<T>(items: Promise<T[]>): Promise<{ items: T[]; error?: string }> {
+  return items.then((items) => ({ items }), (error) => {
+    log(`Release lookup failed: ${error}`);
+    return { items: [], error: String(error) };
+  });
+}
+
 // DeckyHub's own recent releases (both channels) for its update window's
 // version picker, each with its DeckyHub-*.zip only when it carries a SHA-256
 // — Decky Loader's installer needs one to verify the download.
-export async function listDeckyHubReleases(force = false): Promise<{ items: DeckyHubReleaseOption[]; error?: string }> {
-  try {
-    const items = (await fetchReleases("mazillka/deckyhub-plugin", force)).map(({ assets, ...release }) => ({
-      ...release,
-      asset: assets.find((asset) => /^DeckyHub-.*\.zip$/i.test(asset.name) && /^[0-9a-f]{64}$/i.test(asset.sha256 ?? "")),
-    }));
-    return { items };
-  } catch (error) {
-    log(`Release lookup failed: ${error}`);
-    return { items: [], error: String(error) };
-  }
+export function listDeckyHubReleases(force = false): Promise<{ items: DeckyHubReleaseOption[]; error?: string }> {
+  return listOrError(fetchReleases("mazillka/deckyhub-plugin", force).then((releases) => releases.map(({ assets, ...release }) => ({
+    ...release,
+    asset: assets.find((asset) => /^DeckyHub-.*\.zip$/i.test(asset.name) && /^[0-9a-f]{64}$/i.test(asset.sha256 ?? "")),
+  }))));
 }
 
 // Newest release on the given channel for the QAM "Update" button.
@@ -476,17 +478,11 @@ export async function latestDeckyHubRelease(channel: UpdateChannel, force = fals
 
 // A tracked app's recent releases (tag-filtered, assets matched to its
 // filters) for its version picker in AppDetailsModal.
-export async function listAppReleases(app: App, preference?: RepoPreference, force = false): Promise<{ items: AppReleaseOption[]; error?: string }> {
-  try {
-    const tagInclude = app.releaseTagInclude?.toLowerCase();
-    const items = (await fetchReleases(app.repo, force))
-      .filter((release) => !tagInclude || release.tag.toLowerCase().includes(tagInclude))
-      .map((release) => ({ ...release, assets: matchingAssets(app, release.assets, preference?.assetFilter) }));
-    return { items };
-  } catch (error) {
-    log(`Release lookup failed: ${error}`);
-    return { items: [], error: String(error) };
-  }
+export function listAppReleases(app: App, preference?: RepoPreference, force = false): Promise<{ items: AppReleaseOption[]; error?: string }> {
+  const tagInclude = app.releaseTagInclude?.toLowerCase();
+  return listOrError(fetchReleases(app.repo, force).then((releases) => releases
+    .filter((release) => !tagInclude || release.tag.toLowerCase().includes(tagInclude))
+    .map((release) => ({ ...release, assets: matchingAssets(app, release.assets, preference?.assetFilter) }))));
 }
 
 // Fills in a card's latest release for its channel and whether it's newer

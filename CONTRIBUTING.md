@@ -41,7 +41,7 @@ For development, rebuild the frontend after every change to `src/`, then reload 
 
 ## Adding a registry entry
 
-New curated repositories go in `registry/apps.json`. Each entry needs `id`, `name`, `repo` (`owner/repo`), `category`, `versionStrategy`, `source`, a `detect` block matching the plugin's name as Decky reports it, and an `asset` include/exclude filter for picking the right release ZIP. Follow the shape of existing entries.
+New curated repositories go in `registry/apps.json`. Each entry needs `id`, `name`, `repo` (`owner/repo`), `category`, a `detect` block matching the plugin's name as Decky reports it, and an `asset` include/exclude filter for picking the right release ZIP. Follow the shape of existing entries.
 
 ## Releases
 
