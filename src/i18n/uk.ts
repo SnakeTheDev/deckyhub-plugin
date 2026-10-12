@@ -5,7 +5,6 @@ export const uk: Record<MessageKey, string> = {
   "nav.discover": "Огляд",
   "nav.repositories": "Репозиторії",
   "nav.settings": "Налаштування",
-  "nav.browse": "Перегляд",
 
   "view.updatesDescription": "",
   "view.updatesEmpty": "Усе встановлене оновлено.",

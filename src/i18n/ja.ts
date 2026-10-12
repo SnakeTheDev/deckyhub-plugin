@@ -5,7 +5,6 @@ export const ja: Record<MessageKey, string> = {
   "nav.discover": "見つける",
   "nav.repositories": "リポジトリ",
   "nav.settings": "設定",
-  "nav.browse": "一覧",
 
   "view.updatesDescription": "",
   "view.updatesEmpty": "すべて最新の状態です。",

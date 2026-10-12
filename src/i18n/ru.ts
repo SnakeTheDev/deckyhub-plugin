@@ -5,7 +5,6 @@ export const ru: Record<MessageKey, string> = {
   "nav.discover": "Обзор",
   "nav.repositories": "Репозитории",
   "nav.settings": "Настройки",
-  "nav.browse": "Просмотр",
 
   "view.updatesDescription": "",
   "view.updatesEmpty": "Всё установленное обновлено.",

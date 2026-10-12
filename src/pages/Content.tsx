@@ -267,7 +267,7 @@ export function Content({ fullPage }: { fullPage?: View }) {
   const updateCount = apps.filter((app) => app.updateAvailable).length;
   const navigation = (
     <>
-      <PanelSection title={t("nav.browse")}>
+      <PanelSection>
         {NAV_LINKS.map(([page, Icon]) => (
           <PanelSectionRow key={page}>
             <Button style={compactButtonStyle} onClick={() => Navigation.Navigate(`/deckyhub/${page}`)}>

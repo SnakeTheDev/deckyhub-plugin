@@ -5,7 +5,6 @@ export const es: Record<MessageKey, string> = {
   "nav.discover": "Descubrir",
   "nav.repositories": "Repositorios",
   "nav.settings": "Ajustes",
-  "nav.browse": "Explorar",
 
   "view.updatesDescription": "",
   "view.updatesEmpty": "Todo lo instalado está actualizado.",

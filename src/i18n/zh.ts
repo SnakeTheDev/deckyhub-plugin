@@ -5,7 +5,6 @@ export const zh: Record<MessageKey, string> = {
   "nav.discover": "发现",
   "nav.repositories": "仓库",
   "nav.settings": "设置",
-  "nav.browse": "浏览",
 
   "view.updatesDescription": "",
   "view.updatesEmpty": "所有已安装项目均为最新版本。",

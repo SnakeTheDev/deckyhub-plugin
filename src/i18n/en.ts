@@ -4,7 +4,6 @@ export const en = {
   "nav.discover": "Discover",
   "nav.repositories": "Repositories",
   "nav.settings": "Settings",
-  "nav.browse": "Browse",
 
   "view.updatesDescription": "",
   "view.updatesEmpty": "Everything installed is up to date.",
