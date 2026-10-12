@@ -21,8 +21,8 @@ export const uk: Record<MessageKey, string> = {
   "content.loadErrorTitle": "Не вдалося завантажити DeckyHub",
   "content.tryAgain": "Спробувати ще раз",
   "content.refresh": "Оновити",
+  "content.updateAll": "Оновити все ({count})",
   "content.cancel": "Скасувати",
-  "content.useDiscover": "Скористайтесь Оглядом, щоб переглянути реєстр.",
 
   "status.updateAvailable": "Є оновлення",
   "status.upToDate": "Останньої версії",
@@ -55,7 +55,6 @@ export const uk: Record<MessageKey, string> = {
   "settings.deckyhubUpdate": "Оновлення DeckyHub",
   "settings.current": "Поточна",
   "settings.checkingVersion": "Перевірка версії",
-  "settings.updateButton": "Оновити",
   "settings.updateButtonAvailable": "Оновити (доступна v{version})",
   "settings.installedVersion": "Встановлено: {version}",
   "settings.latestVersion": "Остання: {version}",

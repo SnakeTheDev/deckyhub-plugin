@@ -21,8 +21,8 @@ export const es: Record<MessageKey, string> = {
   "content.loadErrorTitle": "No se pudo cargar DeckyHub",
   "content.tryAgain": "Reintentar",
   "content.refresh": "Actualizar",
+  "content.updateAll": "Actualizar todo ({count})",
   "content.cancel": "Cancelar",
-  "content.useDiscover": "Usa Descubrir para explorar el registro.",
 
   "status.updateAvailable": "Actualización disponible",
   "status.upToDate": "Actualizado",
@@ -55,7 +55,6 @@ export const es: Record<MessageKey, string> = {
   "settings.deckyhubUpdate": "Actualización de DeckyHub",
   "settings.current": "Actual",
   "settings.checkingVersion": "Comprobando versión",
-  "settings.updateButton": "Actualizar",
   "settings.updateButtonAvailable": "Actualizar (v{version} disponible)",
   "settings.installedVersion": "Instalado: {version}",
   "settings.latestVersion": "Última: {version}",

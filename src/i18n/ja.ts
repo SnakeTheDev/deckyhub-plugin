@@ -21,8 +21,8 @@ export const ja: Record<MessageKey, string> = {
   "content.loadErrorTitle": "DeckyHubを読み込めませんでした",
   "content.tryAgain": "再試行",
   "content.refresh": "更新",
+  "content.updateAll": "すべて更新 ({count})",
   "content.cancel": "キャンセル",
-  "content.useDiscover": "「見つける」からレジストリを見てください。",
 
   "status.updateAvailable": "更新あり",
   "status.upToDate": "最新",
@@ -55,7 +55,6 @@ export const ja: Record<MessageKey, string> = {
   "settings.deckyhubUpdate": "DeckyHubのアップデート",
   "settings.current": "現在",
   "settings.checkingVersion": "バージョンを確認中",
-  "settings.updateButton": "アップデート",
   "settings.updateButtonAvailable": "アップデート（v{version} 利用可能）",
   "settings.installedVersion": "インストール済み: {version}",
   "settings.latestVersion": "最新: {version}",

@@ -1,7 +1,7 @@
 import { toaster } from "@decky/api";
 import { DialogButtonPrimary as Button, PanelSection, PanelSectionRow, showModal } from "@decky/ui";
 import { useEffect, useState } from "react";
-import { FaArrowCircleUp } from "react-icons/fa";
+import { FaArrowCircleUp, FaSync } from "react-icons/fa";
 import { getDeckyHubInfo, getSettings } from "../api";
 import { useT } from "../i18n";
 import type { DeckyHubInfo, DeckyHubRelease, UpdateChannel } from "../types";
@@ -9,7 +9,7 @@ import { compactButtonStyle, latestDeckyHubRelease, log, normalizeVersion, PLUGI
 import { DeckyHubUpdateModal } from "./DeckyHubUpdateModal";
 
 // Deliberately thin: a header naming the installed version and a single
-// "Update" button. Everything else (latest version, self-update progress,
+// button, "Update (vX available)" or "Check for Updates". Everything else (latest version, self-update progress,
 // download-zip fallback, release page, re-check) lives in DeckyHubUpdateModal.
 export function DeckyHubUpdate() {
   const t = useT();
@@ -46,10 +46,7 @@ export function DeckyHubUpdate() {
 
   const loading = info.version === "unknown";
   const title = loading ? `${t("settings.checkingVersion")}…` : `${t("settings.current")} - v${info.version}`;
-  const buttonLabel =
-    release.asset && release.version && isNewer(release.version)
-      ? t("settings.updateButtonAvailable", { version: normalizeVersion(release.version) })
-      : t("settings.updateButton");
+  const hasUpdate = Boolean(release.asset && release.version && isNewer(release.version));
 
   return (
     <PanelSection title={title}>
@@ -59,7 +56,7 @@ export function DeckyHubUpdate() {
           // Read settings on open so Display Settings' hidden buttons are current.
           onClick={() => void getSettings().then((settings) => showModal(<DeckyHubUpdateModal t={t} info={info} channel={channel} onCheckUpdate={() => checkForUpdate(true)} onChannelChange={setChannel} hiddenButtons={settings.hiddenButtons} />))}
         >
-          <FaArrowCircleUp /> {buttonLabel}
+          {hasUpdate ? <FaArrowCircleUp /> : <FaSync />} {hasUpdate ? t("settings.updateButtonAvailable", { version: normalizeVersion(release.version!) }) : t("settings.checkUpdate")}
         </Button>
       </PanelSectionRow>
     </PanelSection>

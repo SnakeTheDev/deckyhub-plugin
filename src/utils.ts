@@ -157,7 +157,7 @@ export const readableBytes = (bytes = 0) => (bytes > 1024 * 1024 ? `${(bytes / 1
 export const statusKey = (app: App): MessageKey =>
   !app.installedVersion ? "filter.notInstalled" : app.updateAvailable ? "status.updateAvailable" : app.updateAvailable === false ? "status.upToDate" : "filter.installed";
 
-export const statusColor = (app: App) => (!app.installedVersion || app.error ? "#ff6b6b" : app.updateAvailable ? "#f0c33c" : app.updateAvailable === false ? "#6bcb6b" : undefined);
+export const statusColor = (app: App) => (app.error ? "#ff6b6b" : !app.installedVersion ? "#8b929a" : app.updateAvailable ? "#f0c33c" : app.updateAvailable === false ? "#6bcb6b" : undefined);
 
 // fetchReleases' localStorage envelope: when it was fetched (for CACHE_TTL)
 // and the data. Only successful results are ever written, so a failure never
@@ -291,6 +291,16 @@ export async function installDeckyPlugin(asset: Asset, pluginName: string, versi
     log(`Decky Loader install_plugin ${pluginName} accepted, waiting for confirm/progress`);
     return result;
   });
+}
+
+// Several updates in one go: Decky Loader shows one confirm dialog listing them
+// all and installs them in order. Fresh-install plugins need their uninstall
+// first, so callers leave them out.
+export function updateDeckyPlugins(updates: { asset: Asset; name: string; version: string }[]) {
+  return callDeckyLoader(
+    "utilities/install_plugins",
+    updates.map(({ asset, name, version }) => ({ artifact: asset.url, name, version: normalizeVersion(displayVersion(version)), hash: asset.sha256 ?? "", install_type: PLUGIN_INSTALL_TYPE.UPDATE })),
+  );
 }
 
 // Logs every stage Decky Loader reports for this install, with elapsed time,

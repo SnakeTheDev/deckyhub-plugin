@@ -21,8 +21,8 @@ export const ru: Record<MessageKey, string> = {
   "content.loadErrorTitle": "Не удалось загрузить DeckyHub",
   "content.tryAgain": "Повторить",
   "content.refresh": "Обновить",
+  "content.updateAll": "Обновить все ({count})",
   "content.cancel": "Отмена",
-  "content.useDiscover": "Воспользуйтесь Обзором, чтобы просмотреть реестр.",
 
   "status.updateAvailable": "Есть обновление",
   "status.upToDate": "Последняя версия",
@@ -55,7 +55,6 @@ export const ru: Record<MessageKey, string> = {
   "settings.deckyhubUpdate": "Обновление DeckyHub",
   "settings.current": "Текущая",
   "settings.checkingVersion": "Проверка версии",
-  "settings.updateButton": "Обновить",
   "settings.updateButtonAvailable": "Обновить (доступна v{version})",
   "settings.installedVersion": "Установлено: {version}",
   "settings.latestVersion": "Последняя: {version}",

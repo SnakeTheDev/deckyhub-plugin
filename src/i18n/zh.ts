@@ -21,8 +21,8 @@ export const zh: Record<MessageKey, string> = {
   "content.loadErrorTitle": "无法加载 DeckyHub",
   "content.tryAgain": "重试",
   "content.refresh": "刷新",
+  "content.updateAll": "全部更新 ({count})",
   "content.cancel": "取消",
-  "content.useDiscover": "请使用“发现”浏览注册表。",
 
   "status.updateAvailable": "有更新",
   "status.upToDate": "已是最新",
@@ -55,7 +55,6 @@ export const zh: Record<MessageKey, string> = {
   "settings.deckyhubUpdate": "DeckyHub 更新",
   "settings.current": "当前",
   "settings.checkingVersion": "正在检查版本",
-  "settings.updateButton": "更新",
   "settings.updateButtonAvailable": "更新（v{version} 可用）",
   "settings.installedVersion": "已安装：{version}",
   "settings.latestVersion": "最新：{version}",

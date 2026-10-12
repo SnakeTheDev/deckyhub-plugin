@@ -20,8 +20,8 @@ export const en = {
   "content.loadErrorTitle": "Could Not Load DeckyHub",
   "content.tryAgain": "Try Again",
   "content.refresh": "Refresh",
+  "content.updateAll": "Update All ({count})",
   "content.cancel": "Cancel",
-  "content.useDiscover": "Use Discover to browse the registry.",
 
   "status.updateAvailable": "Update Available",
   "status.upToDate": "Up To Date",
@@ -54,7 +54,6 @@ export const en = {
   "settings.deckyhubUpdate": "DeckyHub Update",
   "settings.current": "Current",
   "settings.checkingVersion": "Checking version",
-  "settings.updateButton": "Update",
   "settings.updateButtonAvailable": "Update (v{version} available)",
   "settings.installedVersion": "Installed: {version}",
   "settings.latestVersion": "Latest: {version}",

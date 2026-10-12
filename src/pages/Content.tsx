@@ -1,11 +1,11 @@
 import { toaster } from "@decky/api";
 import { DialogButtonPrimary as Button, Dropdown, Focusable, Navigation, PanelSection, PanelSectionRow, Spinner, TextField } from "@decky/ui";
 import { useEffect, useRef, useState } from "react";
-import { FaArrowCircleUp, FaArrowLeft, FaArrowRight, FaCog, FaFileExport, FaListUl, FaSearch, FaSync } from "react-icons/fa";
+import { FaArrowCircleUp, FaArrowLeft, FaArrowRight, FaCog, FaFileExport, FaListUl, FaSearch, FaSync, FaTimes, FaArrowUp } from "react-icons/fa";
 import { downloadAsset, exportLogs, getApps, getSettings, REGISTRY_UPDATED } from "../api";
 import { useT } from "../i18n";
 import type { App, Asset, HideableButton, RepoPreference, UpdateChannel, View } from "../types";
-import { compactButtonStyle, DEFAULT_COLUMNS_PER_ROW, getDeckyBackend, hydrate, log, notifyUpdates, sectionDividerStyle } from "../utils";
+import { compactButtonStyle, DEFAULT_COLUMNS_PER_ROW, getDeckyBackend, hydrate, installAction, log, needsFreshInstall, notifyUpdates, PLUGIN_INSTALL_TYPE, sectionDividerStyle, updateDeckyPlugins } from "../utils";
 import { AppCard } from "../components/AppCard";
 import { CleanupSection } from "../components/CleanupSection";
 import { showDownloadModal } from "../components/DownloadProgress";
@@ -35,6 +35,7 @@ export function Content({ fullPage }: { fullPage?: View }) {
   const [columnsPerRow, setColumnsPerRow] = useState(DEFAULT_COLUMNS_PER_ROW);
   const [repoPreferences, setRepoPreferences] = useState<Record<string, RepoPreference>>({});
   const [hiddenButtons, setHiddenButtons] = useState<HideableButton[]>([]);
+  const [updatingAll, setUpdatingAll] = useState(false);
   const quickAccessRef = useRef<HTMLDivElement>(null);
 
   const info = view === "updates"
@@ -172,13 +173,24 @@ export function Content({ fullPage }: { fullPage?: View }) {
       : (!query || `${app.name} ${app.repo}`.toLowerCase().includes(query.toLowerCase())) &&
         (installedFilter === "All" || (installedFilter === "Installed") === Boolean(app.installedVersion)),
   );
+  // Decky plugins the Updates page can update in one batch (see updateDeckyPlugins).
+  const batchUpdates = view === "updates" && !hiddenButtons.includes("update")
+    ? visibleApps.flatMap((app) => {
+        const action = app.latestVersion ? installAction(app, { tag: app.latestVersion, assets: app.assets }) : null;
+        return action?.type === PLUGIN_INSTALL_TYPE.UPDATE && !needsFreshInstall(action.name, action.type) ? [{ asset: app.assets[0], name: action.name, version: app.latestVersion! }] : [];
+      })
+    : [];
+  const updateAll = () => {
+    setUpdatingAll(true);
+    void updateDeckyPlugins(batchUpdates)
+      .catch((error: unknown) => toaster.toast({ title: "DeckyHub", body: String(error) }))
+      .finally(() => setUpdatingAll(false));
+  };
   const pageCount = Math.max(1, Math.ceil(visibleApps.length / CARDS_PER_PAGE));
   const currentPage = Math.min(cardPage, pageCount - 1);
   const displayedApps = visibleApps.slice(currentPage * CARDS_PER_PAGE, (currentPage + 1) * CARDS_PER_PAGE);
   const page = (
       <>
-      {discoverFilters}
-      {discoverFilters && <div aria-hidden style={sectionDividerStyle} />}
       {loading && (
         <PanelSection>
           <PanelSectionRow>
@@ -209,10 +221,19 @@ export function Content({ fullPage }: { fullPage?: View }) {
                     <FaSync /> {t("content.refresh")}
                   </Button>
                 </div>
+                {batchUpdates.length > 1 && (
+                  <div style={{ flex: 1 }}>
+                    <Button style={compactButtonStyle} disabled={updatingAll} onClick={updateAll}>
+                      <FaArrowUp /> {t("content.updateAll", { count: batchUpdates.length })}
+                    </Button>
+                  </div>
+                )}
               </Focusable>
             </PanelSectionRow>
           </PanelSection>
           <div aria-hidden style={sectionDividerStyle} />
+          {discoverFilters}
+          {discoverFilters && <div aria-hidden style={sectionDividerStyle} />}
           <FocusableGrid
             items={displayedApps}
             columns={fullPage ? columnsPerRow : 1}
@@ -254,7 +275,19 @@ export function Content({ fullPage }: { fullPage?: View }) {
               {/* Decky's section title is a left-aligned flex row; center it too. */}
               <style>{".deckyhub-empty div { text-align: center; justify-content: center; }"}</style>
               <PanelSection title={info.empty}>
-                <PanelSectionRow>{t("content.useDiscover")}</PanelSectionRow>
+                {view === "updates" ? (
+                  <PanelSectionRow>
+                    <Button style={compactButtonStyle} onClick={() => Navigation.Navigate("/deckyhub/discover")}>
+                      <FaSearch /> {t("nav.discover")}
+                    </Button>
+                  </PanelSectionRow>
+                ) : (query || installedFilter !== "All") && (
+                  <PanelSectionRow>
+                    <Button style={compactButtonStyle} onClick={() => { setQuery(""); setInstalledFilter("All"); }}>
+                      <FaTimes /> {t("repos.clear")}
+                    </Button>
+                  </PanelSectionRow>
+                )}
               </PanelSection>
             </div>
           )}

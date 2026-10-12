@@ -38,8 +38,12 @@ export function AppCard({
         <div>
           <small style={cardDescriptionStyle}>{app.description || " "}</small>
           <span style={{ color: statusColor(app) }}>{t(statusKey(app))}</span>
-          <br />
-          <small>{t("settings.installedVersion", { version: app.installedVersion ? displayVersion(app.installedVersion) : "—" })}</small>
+          {app.installedVersion && (
+            <>
+              <br />
+              <small>{t("settings.installedVersion", { version: displayVersion(app.installedVersion) })}</small>
+            </>
+          )}
           <br />
           <small>{t("settings.latestVersion", { version: app.latestVersion ? displayVersion(app.latestVersion) : "—" })}</small>
           <br />
