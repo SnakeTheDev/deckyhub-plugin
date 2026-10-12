@@ -645,7 +645,7 @@ test("An outdated Decky plugin's card offers Update and hands it to Decky's inst
     await page.goto("/?preview=/deckyhub/updates&bridge=http://127.0.0.1:8643");
     const app = mock(page);
     const makoCard = app.getByRole("heading", { name: "MAKO Decky" }).locator("..");
-    await makoCard.getByRole("button", { name: "Update", exact: true }).click();
+    await makoCard.getByRole("button", { name: "Update to latest", exact: true }).click();
     // Decky's own dialog takes over, so the page is left.
     await expect(mock(page).locator(".qam-content")).toBeVisible();
 
@@ -691,7 +691,7 @@ test("Discover's card installs the latest release of a Decky plugin that isn't i
   await recordInstalls(page);
   await page.goto("/?preview=/deckyhub/discover&bridge=http://127.0.0.1:8643");
   const makoCard = mock(page).getByRole("heading", { name: "MAKO Decky" }).locator("..");
-  await makoCard.getByRole("button", { name: "Install", exact: true }).click();
+  await makoCard.getByRole("button", { name: "Install latest", exact: true }).click();
   // Decky's own dialog takes over, so the page is left.
   await expect(mock(page).locator(".qam-content")).toBeVisible();
 
@@ -708,7 +708,7 @@ test("A release without a GitHub checksum installs as unverified, with an empty 
   await recordInstalls(page);
   await page.goto("/?preview=/deckyhub/discover&bridge=http://127.0.0.1:8643");
   const makoCard = mock(page).getByRole("heading", { name: "MAKO Decky" }).locator("..");
-  await makoCard.getByRole("button", { name: "Install (unverified)", exact: true }).click();
+  await makoCard.getByRole("button", { name: "Install latest (unverified)", exact: true }).click();
 
   // Decky Loader skips its SHA-256 check when the hash is empty.
   const frame = page.frames().find((candidate) => candidate !== page.mainFrame())!;
@@ -731,9 +731,9 @@ test("The Manage window reinstalls or downgrades an installed Decky plugin to th
     const makoCard = app.getByRole("heading", { name: "MAKO Decky" }).locator("..");
     // Absence checks pass on a card whose release hasn't loaded yet, so wait for it first.
     await expect(makoCard.getByText(/^Latest: /)).not.toHaveText("Latest: —");
-    await expect(makoCard.getByRole("button", { name: "Install", exact: true })).toHaveCount(0);
+    await expect(makoCard.getByRole("button", { name: "Install latest", exact: true })).toHaveCount(0);
     // Up to date, so the card offers no Update either.
-    await expect(makoCard.getByRole("button", { name: "Update", exact: true })).toHaveCount(0);
+    await expect(makoCard.getByRole("button", { name: "Update to latest", exact: true })).toHaveCount(0);
     await makoCard.getByRole("button", { name: "Manage", exact: true }).click();
     const modal = app.locator(".steam-modal");
     await expect(modal.getByRole("button", { name: "Reinstall v1.2.3", exact: true })).toBeVisible();
@@ -767,15 +767,15 @@ test("Unifideck updates by uninstalling first and installing fresh, after a warn
     await page.goto("/?preview=/deckyhub/discover&bridge=http://127.0.0.1:8643");
     const app = mock(page);
     // The card's quick Update goes through the same warning as the Manage window's.
-    await app.getByRole("heading", { name: "Unifideck" }).locator("..").getByRole("button", { name: "Update", exact: true }).click();
+    await app.getByRole("heading", { name: "Unifideck" }).locator("..").getByRole("button", { name: "Update to latest", exact: true }).click();
 
     const frame = page.frames().find((candidate) => candidate !== page.mainFrame())!;
     const calls = () => frame.evaluate(() => (window as unknown as { __installCalls: unknown[][] }).__installCalls);
     // Nothing reaches Decky until the uninstall-first warning is confirmed.
-    const confirm = app.locator(".steam-modal", { hasText: "Update?" });
+    const confirm = app.locator(".steam-modal", { hasText: "Update to latest?" });
     await expect(confirm.getByText("removes the installed version first", { exact: false })).toBeVisible();
     expect(await calls()).toEqual([]);
-    await confirm.getByRole("button", { name: "Update", exact: true }).click();
+    await confirm.getByRole("button", { name: "Update to latest", exact: true }).click();
 
     await expect.poll(calls).toEqual([
       ["utilities/uninstall_plugin", "Unifideck"],
