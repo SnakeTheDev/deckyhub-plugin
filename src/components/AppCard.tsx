@@ -1,6 +1,6 @@
 import { toaster } from "@decky/api";
 import { DialogButtonPrimary as Button, PanelSection, PanelSectionRow, showModal } from "@decky/ui";
-import { FaCog, FaPlus } from "react-icons/fa";
+import { FaArrowUp, FaCog, FaPlus } from "react-icons/fa";
 import { useT } from "../i18n";
 import type { App, Asset, HideableButton, RepoPreference, UpdateChannel } from "../types";
 import { compactButtonStyle, cardDescriptionStyle, displayVersion, installAction, installDeckyPlugin, PLUGIN_INSTALL_TYPE, statusKey, statusColor, unverifiedLabel } from "../utils";
@@ -24,10 +24,11 @@ export function AppCard({
   onUninstalled: () => void;
 }) {
   const t = useT();
-  // Quick install of the latest release for a not-yet-installed Decky plugin;
+  // Quick install/update to the latest release of a Decky plugin;
   // Manage still offers other versions/channels.
   const install = app.latestVersion ? installAction(app, { tag: app.latestVersion, assets: app.assets }) : null;
-  const canInstall = install?.type === PLUGIN_INSTALL_TYPE.INSTALL;
+  const isUpdate = install?.type === PLUGIN_INSTALL_TYPE.UPDATE;
+  const quickAction = install && (isUpdate || install.type === PLUGIN_INSTALL_TYPE.INSTALL) && !hiddenButtons.includes(isUpdate ? "update" : "install");
   return (
     <PanelSection title={app.name}>
       <PanelSectionRow>
@@ -50,7 +51,7 @@ export function AppCard({
           )}
         </div>
       </PanelSectionRow>
-      {install && canInstall && !hiddenButtons.includes("install") && (
+      {install && quickAction && (
         <PanelSectionRow>
           <Button
             style={compactButtonStyle}
@@ -60,7 +61,7 @@ export function AppCard({
               )
             }
           >
-            <FaPlus /> {unverifiedLabel(t, t("appcard.install"), install.verified)}
+            {isUpdate ? <FaArrowUp /> : <FaPlus />} {unverifiedLabel(t, t(isUpdate ? "appcard.update" : "appcard.install"), install.verified)}
           </Button>
         </PanelSectionRow>
       )}
