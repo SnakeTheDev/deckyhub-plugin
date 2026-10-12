@@ -35,7 +35,6 @@ export const en = {
   "appcard.manage": "Manage",
   "appcard.install": "Install",
   "appcard.installVersion": "Install v{version}",
-  "appcard.unverified": "{label} (unverified)",
   "appcard.update": "Update",
   "appcard.uninstall": "Uninstall",
   "appcard.uninstallTitle": "Uninstall {name}?",

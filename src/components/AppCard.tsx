@@ -3,7 +3,7 @@ import { useState } from "react";
 import { FaArrowUp, FaCog, FaPlus } from "react-icons/fa";
 import { useT } from "../i18n";
 import type { App, Asset, HideableButton, RepoPreference, UpdateChannel } from "../types";
-import { compactButtonStyle, cardDescriptionStyle, displayVersion, installAction, PLUGIN_INSTALL_TYPE, statusKey, statusColor, unverifiedLabel } from "../utils";
+import { compactButtonStyle, cardDescriptionStyle, displayVersion, installAction, PLUGIN_INSTALL_TYPE, statusKey, statusColor } from "../utils";
 import { AppDetailsModal, startPluginInstall } from "./AppDetailsModal";
 
 export function AppCard({
@@ -72,7 +72,7 @@ export function AppCard({
               void startPluginInstall(t, app.name, app.assets[0], app.latestVersion!, install, quickLabel, leavePage).finally(() => setInstalling(false));
             }}
           >
-            {isUpdate ? <FaArrowUp /> : <FaPlus />} {unverifiedLabel(t, quickLabel, install.verified)}
+            {isUpdate ? <FaArrowUp /> : <FaPlus />} {quickLabel}
           </Button>
         </PanelSectionRow>
       )}

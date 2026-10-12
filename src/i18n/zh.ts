@@ -36,7 +36,6 @@ export const zh: Record<MessageKey, string> = {
   "appcard.manage": "管理",
   "appcard.install": "安装",
   "appcard.installVersion": "安装 v{version}",
-  "appcard.unverified": "{label}（未验证）",
   "appcard.update": "更新",
   "appcard.uninstall": "卸载",
   "appcard.uninstallTitle": "卸载 {name}？",

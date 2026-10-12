@@ -48,7 +48,7 @@ Every change that alters what a user sees or does updates the docs in the same P
 
 - Download only GitHub release assets that belong to the selected repository.
 - Treat repository names and imported files as untrusted input; validate them at the backend boundary.
-- Preserve SHA-256 verification for DeckyHub self-updates. Other plugins may install without a checksum, but the button must say "(unverified)" (`unverifiedLabel()`).
+- Preserve SHA-256 verification for DeckyHub self-updates. Other plugins may install without a checksum (Decky receives an empty hash).
 
 ## Release
 

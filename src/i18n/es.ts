@@ -36,7 +36,6 @@ export const es: Record<MessageKey, string> = {
   "appcard.manage": "Gestionar",
   "appcard.install": "Instalar",
   "appcard.installVersion": "Instalar v{version}",
-  "appcard.unverified": "{label} (sin verificar)",
   "appcard.update": "Actualizar",
   "appcard.uninstall": "Desinstalar",
   "appcard.uninstallTitle": "¿Desinstalar {name}?",

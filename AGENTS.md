@@ -4,7 +4,7 @@ This file provides guidance to coding agents (including Claude Code) working in 
 
 ## What this is
 
-DeckyHub is a [Decky Loader](https://decky.xyz/) plugin for Steam Deck: a Python backend (`main.py`) driving a React/TypeScript frontend (`src/`), packaged so Decky Loader can load it in Gaming Mode. It discovers, downloads, and updates other Decky plugins/tools from tracked GitHub repositories. It never installs or executes anything without an explicit tap: besides downloading ZIPs, it offers an optional **Install** / **Update** / **Uninstall** in a Decky plugin's Manage window (Uninstall behind a confirmation, since Decky Loader deletes without one; Install/Update for a release not yet installed, or newer than installed — labelled "(unverified)" when GitHub publishes no checksum for the ZIP) and a one-tap self-update, both via Decky Loader's own installer — see the self-update note under Architecture.
+DeckyHub is a [Decky Loader](https://decky.xyz/) plugin for Steam Deck: a Python backend (`main.py`) driving a React/TypeScript frontend (`src/`), packaged so Decky Loader can load it in Gaming Mode. It discovers, downloads, and updates other Decky plugins/tools from tracked GitHub repositories. It never installs or executes anything without an explicit tap: besides downloading ZIPs, it offers an optional **Install** / **Update** / **Uninstall** in a Decky plugin's Manage window (Uninstall behind a confirmation, since Decky Loader deletes without one; Install/Update for a release not yet installed, or newer than installed) and a one-tap self-update, both via Decky Loader's own installer — see the self-update note under Architecture.
 
 ## Commands
 

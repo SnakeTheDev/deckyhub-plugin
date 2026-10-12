@@ -36,7 +36,6 @@ export const de: Record<MessageKey, string> = {
   "appcard.manage": "Verwalten",
   "appcard.install": "Installieren",
   "appcard.installVersion": "v{version} installieren",
-  "appcard.unverified": "{label} (nicht verifiziert)",
   "appcard.update": "Aktualisieren",
   "appcard.uninstall": "Deinstallieren",
   "appcard.uninstallTitle": "{name} deinstallieren?",

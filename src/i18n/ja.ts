@@ -36,7 +36,6 @@ export const ja: Record<MessageKey, string> = {
   "appcard.manage": "管理",
   "appcard.install": "インストール",
   "appcard.installVersion": "v{version} をインストール",
-  "appcard.unverified": "{label}（未検証）",
   "appcard.update": "アップデート",
   "appcard.uninstall": "アンインストール",
   "appcard.uninstallTitle": "{name}をアンインストールしますか？",

@@ -90,7 +90,7 @@ Tap **Manage** on any card in Discover or Updates to:
 
 - pick the release **channel** (stable or pre-release) and a specific **version**;
 - **Download ZIP**, open the **Release Page**, or **Check for Updates** for that app;
-- for a Decky plugin, **Install** (not installed yet) or **Update** (the selected version is newer than the installed one). This hands the release ZIP to Decky Loader's own installer, the same one the Decky Store uses. Decky asks you to confirm and installs it, verifying the SHA-256 checksum GitHub publishes for the ZIP. Older releases (files uploaded before mid-2025) have no checksum; for those the button reads **Install (unverified)** / **Update (unverified)** and Decky installs without that check;
+- for a Decky plugin, **Install** (not installed yet) or **Update** (the selected version is newer than the installed one). This hands the release ZIP to Decky Loader's own installer, the same one the Decky Store uses. Decky asks you to confirm and installs it, verifying the SHA-256 checksum GitHub publishes for the ZIP. Older releases (files uploaded before mid-2025) have no checksum and Decky installs them without that check;
 - for an installed Decky plugin, **Uninstall**, which asks you to confirm and then removes the plugin and its settings through Decky Loader.
 
 ### Downloads

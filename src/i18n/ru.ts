@@ -36,7 +36,6 @@ export const ru: Record<MessageKey, string> = {
   "appcard.manage": "Управление",
   "appcard.install": "Установить",
   "appcard.installVersion": "Установить v{version}",
-  "appcard.unverified": "{label} (не проверено)",
   "appcard.update": "Обновить",
   "appcard.uninstall": "Удалить",
   "appcard.uninstallTitle": "Удалить {name}?",

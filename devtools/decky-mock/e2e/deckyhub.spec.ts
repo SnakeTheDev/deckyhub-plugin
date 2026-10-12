@@ -672,7 +672,7 @@ test("The Manage window offers Install for a Decky plugin that isn't installed y
   // Every version shows as v*.*.*, whatever the tag's prefix.
   await expect(modal.getByLabel("Version").locator("option")).toHaveText(["v1.2.3 (latest)"]);
   await expect(modal.getByRole("button", { name: "Update", exact: true })).toHaveCount(0);
-  await modal.getByRole("button", { name: "Install", exact: true }).click();
+  await modal.getByRole("button", { name: "Install v1.2.3", exact: true }).click();
   // Decky's own dialog takes over, so the page is left.
   await expect(mock(page).locator(".qam-content")).toBeVisible();
 
@@ -701,14 +701,14 @@ test("Discover's card installs the latest release of a Decky plugin that isn't i
   ]);
 });
 
-test("A release without a GitHub checksum installs as unverified, with an empty hash", async ({ page }) => {
+test("A release without a GitHub checksum installs with an empty hash", async ({ page }) => {
   const url = "https://github.com/eugeniosegala/MAKO/releases/download/plugin-v1.2.3/mako-decky.zip";
   const { digest: _, ...asset } = makoRelease("plugin-v1.2.3", "").assets[0];
   await mockMakoReleases(page, [{ ...makoRelease("plugin-v1.2.3", ""), assets: [asset] }]);
   await recordInstalls(page);
   await page.goto("/?preview=/deckyhub/discover&bridge=http://127.0.0.1:8643");
   const makoCard = mock(page).getByRole("heading", { name: "MAKO Decky" }).locator("..");
-  await makoCard.getByRole("button", { name: "Install v1.2.3 (unverified)", exact: true }).click();
+  await makoCard.getByRole("button", { name: "Install v1.2.3", exact: true }).click();
 
   // Decky Loader skips its SHA-256 check when the hash is empty.
   const frame = page.frames().find((candidate) => candidate !== page.mainFrame())!;
@@ -839,7 +839,7 @@ test("Display Settings can hide the Manage window's buttons", async ({ page }) =
     // settings.json is shared with any interactive mock session; start clean.
     await bridgeCall(page, "save_settings", { overwriteExisting: true, updateChannel: "stable", language: "auto", columnsPerRow: 3, githubToken: "" });
     let modal = await openManage();
-    for (const name of ["Install", "Download ZIP", "Release Page"]) await expect(modal.getByRole("button", { name, exact: true })).toBeVisible();
+    for (const name of ["Install v1.2.3", "Download ZIP", "Release Page"]) await expect(modal.getByRole("button", { name, exact: true })).toBeVisible();
     await modal.getByRole("button", { name: "Close", exact: true }).click();
 
     await app.getByRole("button", { name: "/deckyhub/settings" }).click();
@@ -848,7 +848,7 @@ test("Display Settings can hide the Manage window's buttons", async ({ page }) =
 
     modal = await openManage();
     await expect(modal.getByLabel("Version").locator("option").first()).toBeAttached();
-    for (const name of ["Install", "Download ZIP", "Release Page"]) await expect(modal.getByRole("button", { name, exact: true })).toHaveCount(0);
+    for (const name of ["Install v1.2.3", "Download ZIP", "Release Page"]) await expect(modal.getByRole("button", { name, exact: true })).toHaveCount(0);
     await modal.getByRole("button", { name: "Close", exact: true }).click();
 
     // DeckyHub's own update window honours the same toggles ("Hide Update"
