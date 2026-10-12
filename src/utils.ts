@@ -470,8 +470,8 @@ export function listDeckyHubReleases(force = false): Promise<{ items: DeckyHubRe
 }
 
 // Newest release on the given channel for the QAM "Update" button.
-export async function latestDeckyHubRelease(channel: UpdateChannel, force = false): Promise<DeckyHubRelease> {
-  const { items, error } = await listDeckyHubReleases(force);
+export async function latestDeckyHubRelease(channel: UpdateChannel): Promise<DeckyHubRelease> {
+  const { items, error } = await listDeckyHubReleases();
   const release = items.find((item) => item.prerelease === (channel === "prerelease"));
   return release?.asset ? { version: release.tag, asset: release.asset } : { error: error ?? tr("release.noChecksum") };
 }

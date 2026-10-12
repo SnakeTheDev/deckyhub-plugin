@@ -262,6 +262,11 @@ test("DeckyHub automatically notifies about an available update", async ({ page 
   await page.goto("/?bridge=http://127.0.0.1:8643");
   const app = mock(page);
   await expect(app.getByText("DeckyHub: DeckyHub update v9.9.9 is available.")).toBeVisible();
+
+  // Reopening the panel doesn't toast the same update again; its button names it.
+  await page.reload();
+  await expect(app.locator(".qam-content").getByRole("button", { name: "Update to v9.9.9", exact: true })).toBeVisible();
+  await expect(app.getByText("DeckyHub: DeckyHub update v9.9.9 is available.")).toHaveCount(0);
   await app.locator(".qam-content").getByRole("button", { name: "Update to v9.9.9", exact: true }).click();
   await expect(app.locator(".steam-modal").getByRole("button", { name: "Update to v9.9.9", exact: true })).toBeVisible();
   await expect(app.getByRole("button", { name: "Release Page", exact: true })).toBeVisible();
@@ -1271,4 +1276,31 @@ test("Arrow keys move focus through Discover", async ({ page }) => {
   await expect(app.locator(":focus")).toBeVisible();
   await app.locator(":focus").press("ArrowUp");
   await expect(app.locator(":focus")).toBeVisible();
+});
+
+test("Moving focus up into a card or the page header brings its title into view", async ({ page }) => {
+  await page.goto("/?preview=/deckyhub/discover&bridge=http://127.0.0.1:8643");
+  const app = mock(page);
+  await expect(app.getByRole("button", { name: "Manage", exact: true }).nth(3)).toBeVisible();
+
+  // Steam scrolls only far enough to show the focused control; mimic that from
+  // the bottom of the page, then check the control's section title is visible.
+  const titleShownAfterFocus = (button: ReturnType<typeof app.getByRole>) =>
+    button.evaluate(async (control: HTMLElement) => {
+      let scroller = control.parentElement!;
+      while (getComputedStyle(scroller).overflowY !== "auto") scroller = scroller.parentElement!;
+      scroller.scrollTop = scroller.scrollHeight;
+      control.focus({ preventScroll: true });
+      control.scrollIntoView({ block: "start" });
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const view = scroller.getBoundingClientRect();
+      const visible = (element: Element) => {
+        const box = element.getBoundingClientRect();
+        return box.top >= view.top && box.bottom <= view.bottom;
+      };
+      return visible(control.closest("section")!.querySelector("h3")!) && visible(control);
+    });
+
+  expect(await titleShownAfterFocus(app.getByRole("button", { name: "Manage", exact: true }).nth(3))).toBe(true);
+  expect(await titleShownAfterFocus(app.getByRole("button", { name: "Refresh", exact: true }))).toBe(true);
 });

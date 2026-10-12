@@ -27,7 +27,7 @@ export function DeckyHubUpdateModal({
   t: TFunc;
   info: DeckyHubInfo;
   channel: UpdateChannel;
-  onCheckUpdate: () => void;
+  onCheckUpdate: (channel: UpdateChannel) => void;
   onChannelChange: (channel: UpdateChannel) => void;
   hiddenButtons: HideableButton[];
   closeModal?: () => void;
@@ -42,12 +42,13 @@ export function DeckyHubUpdateModal({
 
   const refresh = async () => {
     setChecking(true);
-    onCheckUpdate();
     try {
       await load(true);
     } finally {
       setChecking(false);
     }
+    // Reads the release list load(true) just cached, to update the panel button.
+    onCheckUpdate(channel);
   };
 
   const changeChannel = async (next: UpdateChannel) => {

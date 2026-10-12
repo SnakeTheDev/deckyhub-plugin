@@ -3,7 +3,8 @@ import { useEffect, useState } from "react";
 import { FaExternalLinkAlt, FaSync } from "react-icons/fa";
 import type { TFunc } from "../i18n/en";
 import type { UpdateChannel } from "../types";
-import { modalButtonStyle } from "../utils";
+import { modalButtonStyle, windowGap } from "../utils";
+import { keepInView } from "./KeepInView";
 
 // Shared by both version pickers: the channel's releases and the selected one.
 // A load keeps the current selection while it's still listed, except a forced
@@ -35,7 +36,7 @@ export function useReleasePicker<T extends { tag: string; prerelease: boolean }>
 // The Release Page + Check for Updates row both version pickers end with.
 export function ReleaseActions({ t, url, hideReleasePage, checking, disabled, onCheck, closeModal }: { t: TFunc; url?: string; hideReleasePage: boolean; checking: boolean; disabled: boolean; onCheck: () => void; closeModal?: () => void }) {
   return (
-    <Focusable style={{ display: "flex", gap: 8 }}>
+    <Focusable flow-children="right" style={{ display: "flex", gap: 8 }}>
       {url && !hideReleasePage && (
         <Button style={{ ...modalButtonStyle, flex: 1 }} onClick={() => {
             // Close first: Steam's browser otherwise opens underneath this modal.
@@ -85,27 +86,29 @@ export function VersionPickerPanel({
 }) {
   return (
     <>
-      <strong style={{ fontSize: 16 }}>{title}</strong>
-      <div style={{ fontSize: 13, opacity: 0.75 }}>{subtitle}</div>
+      <div onFocus={keepInView} style={{ display: "grid", gap: windowGap }}>
+        <strong style={{ fontSize: 16 }}>{title}</strong>
+        <div style={{ fontSize: 13, opacity: 0.75 }}>{subtitle}</div>
 
-      <div style={{ display: "grid", gap: 8, padding: 12, background: "rgba(0, 0, 0, 0.2)", borderRadius: 8 }}>
-        {/* Inline label + no separator: Steam's dropdown height is fixed, so
-            this is what keeps each row short. */}
-        <DropdownItem
-          layout="inline"
-          bottomSeparator="none"
-          label={t("settings.updateChannel")}
-          rgOptions={[
-            { label: t("settings.stableReleases"), data: "stable" },
-            { label: t("settings.preReleases"), data: "prerelease" },
-          ]}
-          selectedOption={channel}
-          disabled={disabled}
-          onChange={({ data }) => onChannelChange(data as UpdateChannel)}
-        />
-        {versionOptions.length > 0 && (
-          <DropdownItem layout="inline" bottomSeparator="none" label={t("settings.version")} rgOptions={versionOptions} selectedOption={selectedTag} disabled={disabled} onChange={({ data }) => onVersionChange(String(data))} />
-        )}
+        <div style={{ display: "grid", gap: 8, padding: 12, background: "rgba(0, 0, 0, 0.2)", borderRadius: 8 }}>
+          {/* Inline label + no separator: Steam's dropdown height is fixed, so
+              this is what keeps each row short. */}
+          <DropdownItem
+            layout="inline"
+            bottomSeparator="none"
+            label={t("settings.updateChannel")}
+            rgOptions={[
+              { label: t("settings.stableReleases"), data: "stable" },
+              { label: t("settings.preReleases"), data: "prerelease" },
+            ]}
+            selectedOption={channel}
+            disabled={disabled}
+            onChange={({ data }) => onChannelChange(data as UpdateChannel)}
+          />
+          {versionOptions.length > 0 && (
+            <DropdownItem layout="inline" bottomSeparator="none" label={t("settings.version")} rgOptions={versionOptions} selectedOption={selectedTag} disabled={disabled} onChange={({ data }) => onVersionChange(String(data))} />
+          )}
+        </div>
       </div>
 
       {error && <small style={{ color: "#ff6b6b" }}>{error}</small>}

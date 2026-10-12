@@ -10,6 +10,7 @@ import { AppCard } from "../components/AppCard";
 import { CleanupSection } from "../components/CleanupSection";
 import { showDownloadModal } from "../components/DownloadProgress";
 import { FocusableGrid } from "../components/FocusableGrid";
+import { KeepInView, keepInView } from "../components/KeepInView";
 import { Pager } from "../components/Pager";
 import { RateLimitBanner } from "../components/RateLimitBanner";
 import { DeckyHubUpdate } from "../components/DeckyHubUpdate";
@@ -121,9 +122,8 @@ export function Content({ fullPage }: { fullPage?: View }) {
       if (!result.jobId) return;
       setDownloading(true);
       await new Promise<void>((resolve) =>
-        showDownloadModal(t, result.jobId!, { state: "queued", filename: asset.name, total: asset.size }, (state) => {
+        showDownloadModal(t, result.jobId!, { state: "queued", filename: asset.name, total: asset.size }, () => {
           setDownloading(false);
-          if (state.state === "error") toaster.toast({ title: t("dl.failedTitle"), body: state.error || t("dl.failedNoReason") });
           resolve();
         }),
       );
@@ -204,36 +204,40 @@ export function Content({ fullPage }: { fullPage?: View }) {
         </PanelSection>
       )}
       {loadError && (
-        <PanelSection title={t("content.loadErrorTitle")}>
-          <PanelSectionRow>{loadError}</PanelSectionRow>
-          <PanelSectionRow>
-            <Button style={compactButtonStyle} onClick={() => void load(true)}>
-              <FaSync /> {t("content.tryAgain")}
-            </Button>
-          </PanelSectionRow>
-        </PanelSection>
+        <KeepInView>
+          <PanelSection title={t("content.loadErrorTitle")}>
+            <PanelSectionRow>{loadError}</PanelSectionRow>
+            <PanelSectionRow>
+              <Button style={compactButtonStyle} onClick={() => void load(true)}>
+                <FaSync /> {t("content.tryAgain")}
+              </Button>
+            </PanelSectionRow>
+          </PanelSection>
+        </KeepInView>
       )}
       {!loading && !loadError && (
         <>
-          <PanelSection title={info.title}>
-            <PanelSectionRow>
-              <Focusable flow-children="right" style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <div style={{ flex: 1, minWidth: 0 }}>{info.description}</div>
-                <div style={{ flex: "0 0 180px" }}>
-                  <Button style={compactButtonStyle} onClick={() => void load(true)}>
-                    <FaSync /> {t("content.refresh")}
-                  </Button>
-                </div>
-                {batchUpdates.length > 1 && (
-                  <div style={{ flex: 1 }}>
-                    <Button style={compactButtonStyle} disabled={updatingAll} onClick={updateAll}>
-                      <FaArrowUp /> {t("content.updateAll", { count: batchUpdates.length })}
+          <KeepInView>
+            <PanelSection title={info.title}>
+              <PanelSectionRow>
+                <Focusable flow-children="right" style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>{info.description}</div>
+                  <div style={{ flex: "0 0 180px" }}>
+                    <Button style={compactButtonStyle} onClick={() => void load(true)}>
+                      <FaSync /> {t("content.refresh")}
                     </Button>
                   </div>
-                )}
-              </Focusable>
-            </PanelSectionRow>
-          </PanelSection>
+                  {batchUpdates.length > 1 && (
+                    <div style={{ flex: 1 }}>
+                      <Button style={compactButtonStyle} disabled={updatingAll} onClick={updateAll}>
+                        <FaArrowUp /> {t("content.updateAll", { count: batchUpdates.length })}
+                      </Button>
+                    </div>
+                  )}
+                </Focusable>
+              </PanelSectionRow>
+            </PanelSection>
+          </KeepInView>
           <div aria-hidden style={sectionDividerStyle} />
           {discoverFilters}
           {discoverFilters && <div aria-hidden style={sectionDividerStyle} />}
@@ -262,7 +266,7 @@ export function Content({ fullPage }: { fullPage?: View }) {
             </PanelSection>
           )}
           {!visibleApps.length && (
-            <div className="deckyhub-empty" style={{ textAlign: "center" }}>
+            <div className="deckyhub-empty" onFocus={keepInView} style={{ textAlign: "center" }}>
               {/* Decky's section title is a left-aligned flex row; center it too. */}
               <style>{".deckyhub-empty div { text-align: center; justify-content: center; }"}</style>
               <PanelSection title={info.empty}>
@@ -305,16 +309,18 @@ export function Content({ fullPage }: { fullPage?: View }) {
       <DeckyHubUpdate />
       <CleanupSection />
       <div aria-hidden style={sectionDividerStyle} />
-      <PanelSection title={t("settings.troubleshooting")}>
-        <PanelSectionRow>
-          <Button style={compactButtonStyle} onClick={() => void exportLogs().then(({ path }) => toaster.toast({ title: "DeckyHub", body: t("repos.exportedTo", { path }) }))}>
-            <FaFileExport /> {t("settings.exportLogs")}
-          </Button>
-        </PanelSectionRow>
-        <PanelSectionRow>
-          <div style={{ color: "#8fcef4", fontSize: "0.85em" }}>{t("settings.exportLogsNote")}</div>
-        </PanelSectionRow>
-      </PanelSection>
+      <KeepInView>
+        <PanelSection title={t("settings.troubleshooting")}>
+          <PanelSectionRow>
+            <Button style={compactButtonStyle} onClick={() => void exportLogs().then(({ path }) => toaster.toast({ title: "DeckyHub", body: t("repos.exportedTo", { path }) }))}>
+              <FaFileExport /> {t("settings.exportLogs")}
+            </Button>
+          </PanelSectionRow>
+          <PanelSectionRow>
+            <div style={{ color: "#8fcef4", fontSize: "0.85em" }}>{t("settings.exportLogsNote")}</div>
+          </PanelSectionRow>
+        </PanelSection>
+      </KeepInView>
     </>
   );
 

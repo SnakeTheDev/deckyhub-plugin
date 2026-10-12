@@ -1,6 +1,7 @@
 import { FileSelectionType, openFilePicker, toaster } from "@decky/api";
 import { DialogButtonPrimary as Button, ConfirmModal, Focusable, PanelSection, PanelSectionRow, showModal, TextField } from "@decky/ui";
 import { FocusableGrid } from "../components/FocusableGrid";
+import { KeepInView } from "../components/KeepInView";
 import { Pager } from "../components/Pager";
 import { RateLimitBanner } from "../components/RateLimitBanner";
 import { useEffect, useState } from "react";
@@ -91,39 +92,41 @@ export function ManageRepositoriesPage() {
   return (
     <>
       <RateLimitBanner />
-      <PanelSection title={t("repos.addGithubRepository")}>
-        <PanelSectionRow>
-          <Focusable flow-children="right" style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <TextField label={t("repos.searchGithub")} value={query} onChange={(event) => setQuery(event.currentTarget.value)} />
-            </div>
-            <div style={{ flex: "0 0 160px", paddingTop: 24 }}>
-              <Button style={compactButtonStyle} onClick={() => void search()} disabled={searching}>
-                <FaSearch /> {searching ? t("repos.searching") : t("filter.search")}
-              </Button>
-            </div>
-            <div style={{ flex: "0 0 120px", paddingTop: 24 }}>
-              <Button
-                style={compactButtonStyle}
-                onClick={() => {
-                  setQuery("");
-                  setResults([]);
-                  setSearchError(null);
-                  setPage(0);
-                }}
-              >
-                <FaTimes /> {t("repos.clear")}
-              </Button>
-            </div>
-          </Focusable>
-        </PanelSectionRow>
-        {searchError && <PanelSectionRow>{searchError}</PanelSectionRow>}
-        {results.length > RESULTS_PER_PAGE && (
+      <KeepInView>
+        <PanelSection title={t("repos.addGithubRepository")}>
           <PanelSectionRow>
-            <Pager page={page} total={Math.ceil(results.length / RESULTS_PER_PAGE)} onChange={setPage} />
+            <Focusable flow-children="right" style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <TextField label={t("repos.searchGithub")} value={query} onChange={(event) => setQuery(event.currentTarget.value)} />
+              </div>
+              <div style={{ flex: "0 0 160px", paddingTop: 24 }}>
+                <Button style={compactButtonStyle} onClick={() => void search()} disabled={searching}>
+                  <FaSearch /> {searching ? t("repos.searching") : t("filter.search")}
+                </Button>
+              </div>
+              <div style={{ flex: "0 0 120px", paddingTop: 24 }}>
+                <Button
+                  style={compactButtonStyle}
+                  onClick={() => {
+                    setQuery("");
+                    setResults([]);
+                    setSearchError(null);
+                    setPage(0);
+                  }}
+                >
+                  <FaTimes /> {t("repos.clear")}
+                </Button>
+              </div>
+            </Focusable>
           </PanelSectionRow>
-        )}
-      </PanelSection>
+          {searchError && <PanelSectionRow>{searchError}</PanelSectionRow>}
+          {results.length > RESULTS_PER_PAGE && (
+            <PanelSectionRow>
+              <Pager page={page} total={Math.ceil(results.length / RESULTS_PER_PAGE)} onChange={setPage} />
+            </PanelSectionRow>
+          )}
+        </PanelSection>
+      </KeepInView>
       {results.length > 0 && (
         <>
           <div aria-hidden style={sectionDividerStyle} />
@@ -151,30 +154,32 @@ export function ManageRepositoriesPage() {
 
       <div aria-hidden style={sectionDividerStyle} />
 
-      <PanelSection title={t("repos.managedRepositories")}>
-        <PanelSectionRow>
-          <Focusable flow-children="right" style={{ display: "flex", gap: 12 }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <Button style={compactButtonStyle} onClick={() => void exportList()}>
-                <FaFileExport /> {t("repos.export")}
-              </Button>
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <Button style={compactButtonStyle} onClick={() => void importList()}>
-                <FaFileImport /> {t("repos.import")}
-              </Button>
-            </div>
-          </Focusable>
-        </PanelSectionRow>
-        {customRepos.map((repo) => (
-          <PanelSectionRow key={repo}>
-            <Button style={compactButtonStyle} onClick={() => confirmRemove(repo)}>
-              <FaTrash /> {t("repos.remove", { repo })}
-            </Button>
+      <KeepInView>
+        <PanelSection title={t("repos.managedRepositories")}>
+          <PanelSectionRow>
+            <Focusable flow-children="right" style={{ display: "flex", gap: 12 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <Button style={compactButtonStyle} onClick={() => void exportList()}>
+                  <FaFileExport /> {t("repos.export")}
+                </Button>
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <Button style={compactButtonStyle} onClick={() => void importList()}>
+                  <FaFileImport /> {t("repos.import")}
+                </Button>
+              </div>
+            </Focusable>
           </PanelSectionRow>
-        ))}
-        {!customRepos.length && <PanelSectionRow>{t("repos.noCustomRepos")}</PanelSectionRow>}
-      </PanelSection>
+          {customRepos.map((repo) => (
+            <PanelSectionRow key={repo}>
+              <Button style={compactButtonStyle} onClick={() => confirmRemove(repo)}>
+                <FaTrash /> {t("repos.remove", { repo })}
+              </Button>
+            </PanelSectionRow>
+          ))}
+          {!customRepos.length && <PanelSectionRow>{t("repos.noCustomRepos")}</PanelSectionRow>}
+        </PanelSection>
+      </KeepInView>
     </>
   );
 }

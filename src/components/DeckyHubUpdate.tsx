@@ -1,12 +1,31 @@
 import { toaster } from "@decky/api";
 import { DialogButtonPrimary as Button, PanelSection, PanelSectionRow, showModal } from "@decky/ui";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { FaArrowCircleUp, FaSync } from "react-icons/fa";
 import { getDeckyHubInfo, getSettings } from "../api";
 import { useT } from "../i18n";
 import type { DeckyHubInfo, DeckyHubRelease, UpdateChannel } from "../types";
 import { compactButtonStyle, latestDeckyHubRelease, log, normalizeVersion, PLUGIN_INSTALL_TYPE, resolveDeckyHubInstallType } from "../utils";
 import { DeckyHubUpdateModal } from "./DeckyHubUpdateModal";
+import { KeepInView } from "./KeepInView";
+
+const SELF_UPDATE_NOTICE_KEY = "deckyhub-self-update-notice";
+
+const readNotice = () => {
+  try {
+    return localStorage.getItem(SELF_UPDATE_NOTICE_KEY);
+  } catch {
+    return null;
+  }
+};
+
+const writeNotice = (version: string) => {
+  try {
+    localStorage.setItem(SELF_UPDATE_NOTICE_KEY, version);
+  } catch {
+    // Storage unavailable: the toast just repeats next time.
+  }
+};
 
 // Deliberately thin: a header naming the installed version and a single
 // button, "Update to vX" or "Check for Updates". Everything else (latest version, self-update progress,
@@ -22,12 +41,14 @@ export function DeckyHubUpdate() {
   const isNewer = (version?: string) =>
     Boolean(version && info.version !== "unknown" && resolveDeckyHubInstallType(version, info.version) === PLUGIN_INSTALL_TYPE.UPDATE);
 
-  const checkForUpdate = (force = false) =>
-    void latestDeckyHubRelease(channel, force).then((next) => {
+  // Only the automatic check toasts, once per version: the button already
+  // names the update, and an explicit check happens in the open update window.
+  const checkForUpdate = (notify: boolean, checkedChannel = channel) =>
+    void latestDeckyHubRelease(checkedChannel).then((next) => {
       setRelease(next);
-      if (next.version && !next.error && isNewer(next.version)) {
-        toaster.toast({ title: "DeckyHub", body: t("settings.updateAvailable", { version: next.version }) });
-      }
+      if (!notify || !next.version || next.error || !isNewer(next.version) || readNotice() === next.version) return;
+      writeNotice(next.version);
+      toaster.toast({ title: "DeckyHub", body: t("settings.updateAvailable", { version: next.version }) });
     });
 
   useEffect(() => {
@@ -40,8 +61,12 @@ export function DeckyHubUpdate() {
     });
   }, []);
 
+  // Channel changes come from the open update window, so they don't toast.
+  const autoChecked = useRef(false);
   useEffect(() => {
-    if (info.version !== "unknown") checkForUpdate();
+    if (info.version === "unknown") return;
+    checkForUpdate(!autoChecked.current);
+    autoChecked.current = true;
   }, [channel, info.version]);
 
   const loading = info.version === "unknown";
@@ -49,16 +74,18 @@ export function DeckyHubUpdate() {
   const hasUpdate = Boolean(release.asset && release.version && isNewer(release.version));
 
   return (
-    <PanelSection title={title}>
-      <PanelSectionRow>
-        <Button
-          style={compactButtonStyle}
-          // Read settings on open so Display Settings' hidden buttons are current.
-          onClick={() => void getSettings().then((settings) => showModal(<DeckyHubUpdateModal t={t} info={info} channel={channel} onCheckUpdate={() => checkForUpdate(true)} onChannelChange={setChannel} hiddenButtons={settings.hiddenButtons} />))}
-        >
-          {hasUpdate ? <FaArrowCircleUp /> : <FaSync />} {hasUpdate ? t("settings.updateTo", { version: normalizeVersion(release.version!) }) : t("settings.checkUpdate")}
-        </Button>
-      </PanelSectionRow>
-    </PanelSection>
+    <KeepInView>
+      <PanelSection title={title}>
+        <PanelSectionRow>
+          <Button
+            style={compactButtonStyle}
+            // Read settings on open so Display Settings' hidden buttons are current.
+            onClick={() => void getSettings().then((settings) => showModal(<DeckyHubUpdateModal t={t} info={info} channel={channel} onCheckUpdate={(checkedChannel) => checkForUpdate(false, checkedChannel)} onChannelChange={setChannel} hiddenButtons={settings.hiddenButtons} />))}
+          >
+            {hasUpdate ? <FaArrowCircleUp /> : <FaSync />} {hasUpdate ? t("settings.updateTo", { version: normalizeVersion(release.version!) }) : t("settings.checkUpdate")}
+          </Button>
+        </PanelSectionRow>
+      </PanelSection>
+    </KeepInView>
   );
 }
