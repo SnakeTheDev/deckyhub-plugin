@@ -58,6 +58,7 @@ export function AppDetailsModal({
 }) {
   const [channel, setChannel] = useState<UpdateChannel>(initialPreference.channel);
   const { items: releases, selectedTag, setSelectedTag, loading, error: fetchError, load, selected: selectedRelease } = useReleasePicker((force) => listAppReleases(app, initialPreference, force), channel);
+  // Every action but Check for Updates and Download ZIP closes this window.
   // This modal was rendered once by showModal(), so the downloadDisabled prop
   // never updates — track downloads started from here locally.
   const [downloading, setDownloading] = useState(Boolean(downloadDisabled));
@@ -94,16 +95,16 @@ export function AppDetailsModal({
         strDescription={t("appcard.uninstallDescription")}
         strOKButtonText={t("appcard.uninstall")}
         bDestructiveWarning
-        onOK={() =>
+        onOK={() => {
+          closeModal?.();
           void uninstallDeckyPlugin(app.pluginName!).then(
             () => {
               toaster.toast({ title: "DeckyHub", body: t("appcard.uninstalled", { name: app.name }) });
-              closeModal?.();
               onUninstalled();
             },
             (error: unknown) => toaster.toast({ title: "DeckyHub", body: String(error) }),
-          )
-        }
+          );
+        }}
       />,
     );
 

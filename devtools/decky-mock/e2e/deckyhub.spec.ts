@@ -424,6 +424,25 @@ test("DeckyHub falls back to a clear message when automatic update can't reach D
   await expect(app.getByText("Automatic update is unavailable right now — use Download ZIP instead.")).toBeVisible();
 });
 
+test("DeckyHub's Reinstall closes its window and hands the release to Decky's installer", async ({ page }) => {
+  const asset = { name: `DeckyHub-${deckyHubTag}.zip`, browser_download_url: `https://github.com/mazillka/deckyhub-plugin/releases/download/${deckyHubTag}/DeckyHub-${deckyHubTag}.zip`, digest: `sha256:${"a".repeat(64)}` };
+  await page.route("https://api.github.com/repos/mazillka/deckyhub-plugin/releases?per_page=20", (route) =>
+    route.fulfill({ json: [{ tag_name: deckyHubTag, prerelease: false, html_url: `https://github.com/mazillka/deckyhub-plugin/releases/tag/${deckyHubTag}`, assets: [asset] }] }),
+  );
+  await recordInstalls(page);
+  await page.goto("/?bridge=http://127.0.0.1:8643");
+  const app = mock(page);
+  await app.locator(".qam-content").getByRole("button", { name: "Check for Updates", exact: true }).click();
+  await app.getByRole("button", { name: `Reinstall v${deckyHubVersion}`, exact: true }).click();
+
+  // Decky's own confirm/progress dialog takes over, so this window gets out of the way.
+  await expect(app.locator(".steam-modal")).toHaveCount(0);
+  const frame = page.frames().find((candidate) => candidate !== page.mainFrame())!;
+  await expect.poll(() => frame.evaluate(() => (window as unknown as { __installCalls: unknown[][] }).__installCalls)).toEqual([
+    ["utilities/install_plugin", asset.browser_download_url, "DeckyHub", deckyHubVersion, "a".repeat(64), 1],
+  ]);
+});
+
 test("DeckyHub version picker re-filters by channel and leaves the channel as it found it", async ({ page }) => {
   const stableRelease = {
     tag_name: deckyHubTag,

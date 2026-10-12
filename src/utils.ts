@@ -387,25 +387,6 @@ export function installAction(app: App, release: { tag: string; assets: Asset[] 
 
 export const unverifiedLabel = (t: TFunc, label: string, verified: boolean) => (verified ? label : t("appcard.unverified", { label }));
 
-export function selfUpdateStageKey(key: string | undefined): MessageKey {
-  switch ((key ?? "").split(".").pop()) {
-    case "start":
-      return "settings.selfUpdateStageStart";
-    case "download_zip":
-    case "increment_count":
-      return "settings.selfUpdateStageDownload";
-    case "open_zip":
-    case "parse_zip":
-      return "settings.selfUpdateStageVerify";
-    case "uninstalling_previous":
-      return "settings.selfUpdateStageRemove";
-    case "installing_plugin":
-      return "settings.selfUpdateStageInstall";
-    default:
-      return "settings.selfUpdateStageWorking";
-  }
-}
-
 function isUpdate(app: App, latest: string | null) {
   if (!app.installedVersion || !latest) return null;
   const cmp = compareVersions(latest, app.installedVersion);
