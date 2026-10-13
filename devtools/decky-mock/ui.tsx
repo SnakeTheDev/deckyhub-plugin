@@ -179,8 +179,9 @@ export function Focusable({ style, children, ...rest }: { style?: CSSProperties;
   const { "flow-children": flowChildren, noFocusRing: _noFocusRing, onActivate, onCancel: _onCancel, ...divProps } = rest;
   const flowStyle = flowChildren === "right" ? { display: "flex", flexDirection: "row" as const } : flowChildren === "down" ? { display: "flex", flexDirection: "column" as const } : {};
   return (
-    // Like Steam, onActivate makes the block itself a focus stop.
-    <div style={{ ...flowStyle, ...style }} tabIndex={onActivate ? 0 : undefined} {...(divProps as React.HTMLAttributes<HTMLDivElement>)}>
+    // Like Steam, onActivate makes the block itself a focus stop. The flow is
+    // exposed so tests can check D-pad structure the geometric mock ignores.
+    <div data-focusable="" data-flow-children={flowChildren as string | undefined} style={{ ...flowStyle, ...style }} tabIndex={onActivate ? 0 : undefined} {...(divProps as React.HTMLAttributes<HTMLDivElement>)}>
       {children}
     </div>
   );

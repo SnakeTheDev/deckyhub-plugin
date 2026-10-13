@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 
 const deckyHubVersion = JSON.parse(readFileSync(new URL("../../../package.json", import.meta.url), "utf8")).version;
 const deckyHubTag = `v${deckyHubVersion}`;
@@ -55,6 +55,14 @@ function bridgeCall(page: Page, route: string, ...args: unknown[]) {
     [BRIDGE_URL, route, args] as const,
   );
 }
+
+// A run interrupted mid-test can leave a seeded plugin behind, which would
+// show as installed to every later test; clear them before starting.
+test.beforeAll(() => {
+  const plugins = new URL("../.dev-data/plugins/", import.meta.url);
+  mkdirSync(plugins, { recursive: true });
+  for (const dir of readdirSync(plugins)) if (dir.startsWith("e2e-")) rmSync(new URL(`${dir}/`, plugins), { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+});
 
 test.beforeEach(async ({ page }) => {
   // Every release lookup hits GET /repos/{repo}/releases, which returns a list.
@@ -1278,29 +1286,335 @@ test("Arrow keys move focus through Discover", async ({ page }) => {
   await expect(app.locator(":focus")).toBeVisible();
 });
 
-test("Moving focus up into a card or the page header brings its title into view", async ({ page }) => {
-  await page.goto("/?preview=/deckyhub/discover&bridge=http://127.0.0.1:8643");
-  const app = mock(page);
-  await expect(app.getByRole("button", { name: "Manage", exact: true }).nth(3)).toBeVisible();
-
-  // Steam scrolls only far enough to show the focused control; mimic that from
-  // the bottom of the page, then check the control's section title is visible.
-  const titleShownAfterFocus = (button: ReturnType<typeof app.getByRole>) =>
-    button.evaluate(async (control: HTMLElement) => {
-      let scroller = control.parentElement!;
-      while (getComputedStyle(scroller).overflowY !== "auto") scroller = scroller.parentElement!;
+// Steam scrolls only far enough to show the focused control. Mimic that from
+// the bottom of the page, putting the control flush with the top edge: focus
+// the first control of each section on screen and list the titles left out of view.
+async function titlesHiddenAfterFocus(page: Page) {
+  return mock(page).locator("body").evaluate(async (body) => {
+    const controlSelector = "button:not(:disabled), input, select, [tabindex]:not([tabindex='-1'])";
+    const hidden: string[] = [];
+    for (const section of Array.from(body.querySelectorAll(".steam-screen section"))) {
+      const title = section.querySelector("h3");
+      const control = section.querySelector<HTMLElement>(controlSelector);
+      if (!title || !control || !control.getClientRects().length) continue;
+      let scroller = control.parentElement;
+      while (scroller && getComputedStyle(scroller).overflowY !== "auto") scroller = scroller.parentElement;
+      if (!scroller) continue;
       scroller.scrollTop = scroller.scrollHeight;
       control.focus({ preventScroll: true });
-      control.scrollIntoView({ block: "start" });
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      scroller.scrollTop += control.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+      await new Promise((resolve) => setTimeout(resolve, 50));
       const view = scroller.getBoundingClientRect();
-      const visible = (element: Element) => {
-        const box = element.getBoundingClientRect();
-        return box.top >= view.top && box.bottom <= view.bottom;
-      };
-      return visible(control.closest("section")!.querySelector("h3")!) && visible(control);
-    });
+      const box = title.getBoundingClientRect();
+      if (box.top < view.top || box.bottom > view.bottom) hidden.push(title.textContent ?? "");
+    }
+    return hidden;
+  });
+}
 
-  expect(await titleShownAfterFocus(app.getByRole("button", { name: "Manage", exact: true }).nth(3))).toBe(true);
-  expect(await titleShownAfterFocus(app.getByRole("button", { name: "Refresh", exact: true }))).toBe(true);
+// Pairs of controls sitting side by side whose shared Focusable doesn't flow
+// left-right: Steam's D-pad can't move between them (the mock's can). An open
+// window is checked on its own, since the page behind it can't take focus.
+async function sideBySideWithoutRightFlow(page: Page) {
+  return mock(page).locator("body").evaluate((body) => {
+    const scope = Array.from(body.querySelectorAll(".steam-modal")).pop() ?? body;
+    const controls = Array.from(scope.querySelectorAll<HTMLElement>("button, input, select, [tabindex]:not([tabindex='-1'])"))
+      .filter((control) => control.getClientRects().length && !control.closest(".preview-nav"));
+    const label = (control: HTMLElement) => control.textContent?.trim() || control.getAttribute("aria-label") || control.tagName;
+    const problems = new Set<string>();
+    for (const left of controls) {
+      for (const right of controls) {
+        const a = left.getBoundingClientRect(), b = right.getBoundingClientRect();
+        if (left === right || b.left < a.right || Math.min(a.bottom, b.bottom) <= Math.max(a.top, b.top)) continue;
+        let shared = left.parentElement;
+        while (shared && !shared.contains(right)) shared = shared.parentElement;
+        if (shared?.closest("[data-focusable]")?.getAttribute("data-flow-children") !== "right") problems.add(`${label(left)} → ${label(right)}`);
+      }
+    }
+    return [...problems];
+  });
+}
+
+// Seeds an installed Decky plugin where dev-server.py scans for them.
+function seedPlugin(dir: string, name: string, version: string) {
+  const pluginDir = new URL(`../.dev-data/plugins/${dir}/`, import.meta.url);
+  mkdirSync(pluginDir, { recursive: true });
+  writeFileSync(new URL("plugin.json", pluginDir), JSON.stringify({ name, version }));
+  // Retries: on Windows the bridge's plugin scan can briefly lock the folder.
+  return () => rmSync(pluginDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+}
+
+const defaultSettings = { overwriteExisting: true, updateChannel: "stable", language: "auto", columnsPerRow: 3, githubToken: "", density: "default", hiddenButtons: [] };
+
+test("Moving focus up into a card or the page header brings its title into view", async ({ page }) => {
+  await page.goto("/?preview=/deckyhub/discover&bridge=http://127.0.0.1:8643");
+  await expect(mock(page).getByRole("button", { name: "Manage", exact: true }).nth(3)).toBeVisible();
+  expect(await titlesHiddenAfterFocus(page)).toEqual([]);
+});
+
+test("Moving focus up through Settings and Repositories brings each section title into view", async ({ page }) => {
+  await page.route("https://api.github.com/search/repositories**", (route) =>
+    route.fulfill({ json: { items: Array.from({ length: 5 }, (_, index) => ({ full_name: `example/repo-${index}`, description: "Test repository", stargazers_count: index })) } }),
+  );
+  await page.goto("/?preview=/deckyhub/settings&bridge=http://127.0.0.1:8643");
+  const app = mock(page);
+  await expect(app.getByLabel("Language")).toBeVisible();
+  expect(await titlesHiddenAfterFocus(page)).toEqual([]);
+
+  await app.getByRole("button", { name: "/deckyhub/repositories" }).click();
+  await app.getByLabel("Search GitHub").fill("example");
+  await app.getByRole("button", { name: "Search", exact: true }).click();
+  await expect(app.getByRole("heading", { name: "example/repo-4" })).toBeVisible();
+  expect(await titlesHiddenAfterFocus(page)).toEqual([]);
+});
+
+test("Every row of side-by-side controls lets the D-pad move left and right", async ({ page }) => {
+  await page.route("https://api.github.com/search/repositories**", (route) =>
+    route.fulfill({ json: { items: Array.from({ length: 6 }, (_, index) => ({ full_name: `example/repo-${index}`, description: "Test repository", stargazers_count: index })) } }),
+  );
+  const app = mock(page);
+
+  // Quick Access panel, with the rate-limit banner's two buttons.
+  await expect(app.getByRole("button", { name: "Updates", exact: true })).toBeVisible();
+  await app.getByRole("button", { name: "Rate limit banner", exact: true }).click();
+  expect(await sideBySideWithoutRightFlow(page)).toEqual([]);
+
+  // Discover: header, search/status row, card grid, and its Manage window.
+  await app.getByRole("button", { name: "/deckyhub/discover" }).click();
+  await expect(app.getByRole("button", { name: "Manage", exact: true }).nth(3)).toBeVisible();
+  expect(await sideBySideWithoutRightFlow(page)).toEqual([]);
+  await app.getByRole("heading", { name: "MAKO Decky" }).locator("..").getByRole("button", { name: "Manage", exact: true }).click();
+  await expect(app.locator(".steam-modal").getByRole("button", { name: "Check for Updates", exact: true })).toBeVisible();
+  expect(await sideBySideWithoutRightFlow(page)).toEqual([]);
+  await app.locator(".steam-modal").getByRole("button", { name: "Close", exact: true }).click();
+
+  // Repositories: search row, two-column results, pager, import/export.
+  await app.getByRole("button", { name: "/deckyhub/repositories" }).click();
+  await app.getByLabel("Search GitHub").fill("example");
+  await app.getByRole("button", { name: "Search", exact: true }).click();
+  await expect(app.getByText("Page 1 of 2", { exact: true })).toBeVisible();
+  expect(await sideBySideWithoutRightFlow(page)).toEqual([]);
+
+  // Settings.
+  await app.getByRole("button", { name: "/deckyhub/settings" }).click();
+  await expect(app.getByLabel("Language")).toBeVisible();
+  expect(await sideBySideWithoutRightFlow(page)).toEqual([]);
+
+  // DeckyHub's own update window.
+  await app.getByRole("button", { name: "Quick Access widget", exact: true }).click();
+  await app.locator(".qam-content").getByRole("button", { name: "Check for Updates", exact: true }).click();
+  await expect(app.locator(".steam-modal").getByRole("button", { name: "Close", exact: true })).toBeVisible();
+  expect(await sideBySideWithoutRightFlow(page)).toEqual([]);
+});
+
+test("Quick Access lists its pages in order and badges the number of updates", async ({ page }) => {
+  const removePlugin = seedPlugin("e2e-mako", "MAKO - Frame Generation", "1.0.0");
+  await mockMakoReleases(page, [makoRelease("plugin-v1.2.3", "c".repeat(64))]);
+  try {
+    await page.goto("/?bridge=http://127.0.0.1:8643");
+    const app = mock(page);
+    const nav = app.locator(".qam-content").getByRole("button");
+    await expect(nav.nth(0).locator("span")).toHaveText("1");
+    await expect(nav.nth(0)).toContainText("Updates");
+    await expect(nav.nth(1)).toHaveText("Discover");
+    await expect(nav.nth(2)).toHaveText("Repositories");
+    await expect(nav.nth(3)).toHaveText("Settings");
+    await expect(app.getByText("Browse", { exact: true })).toHaveCount(0);
+  } finally {
+    removePlugin();
+  }
+
+  await page.reload();
+  const updates = mock(page).locator(".qam-content").getByRole("button").first();
+  await expect(updates).toHaveText("Updates");
+  await expect(updates.locator("span")).toHaveCount(0);
+});
+
+test("An up-to-date Decky plugin's card offers only Manage", async ({ page }) => {
+  const removePlugin = seedPlugin("e2e-mako", "MAKO - Frame Generation", "1.2.3");
+  await mockMakoReleases(page, [makoRelease("plugin-v1.2.3", "c".repeat(64))]);
+  try {
+    await page.goto("/?preview=/deckyhub/discover&bridge=http://127.0.0.1:8643");
+    const makoCard = mock(page).getByRole("heading", { name: "MAKO Decky" }).locator("..");
+    await expect(makoCard.getByText("Up To Date", { exact: true })).toBeVisible();
+    await expect(makoCard.getByRole("button")).toHaveText(["Manage"]);
+  } finally {
+    removePlugin();
+  }
+});
+
+test("The Manage window's Install button names the version picked in the dropdown", async ({ page }) => {
+  await mockMakoReleases(page, [makoRelease("plugin-v1.2.3", "a".repeat(64), "02"), makoRelease("plugin-v1.2.2", "b".repeat(64), "01")]);
+  await page.goto("/?preview=/deckyhub/discover&bridge=http://127.0.0.1:8643");
+  const app = mock(page);
+  await app.getByRole("heading", { name: "MAKO Decky" }).locator("..").getByRole("button", { name: "Manage", exact: true }).click();
+  const modal = app.locator(".steam-modal");
+  await expect(modal.getByRole("button", { name: "Install v1.2.3", exact: true })).toBeVisible();
+  await modal.getByLabel("Version").selectOption("plugin-v1.2.2");
+  await expect(modal.getByRole("button", { name: "Install v1.2.2", exact: true })).toBeVisible();
+  await expect(modal.getByRole("button", { name: "Install v1.2.3", exact: true })).toHaveCount(0);
+});
+
+test("Check for Updates and Download ZIP keep the Manage window open", async ({ page }) => {
+  await page.goto("/?preview=/deckyhub/discover&bridge=http://127.0.0.1:8643");
+  const app = mock(page);
+  await app.getByRole("heading", { name: "MAKO Decky" }).locator("..").getByRole("button", { name: "Manage", exact: true }).click();
+  const modal = app.locator(".steam-modal");
+  await modal.getByRole("button", { name: "Check for Updates", exact: true }).click();
+  await expect(modal.getByRole("button", { name: "Check for Updates", exact: true })).toBeEnabled();
+  await expect(modal.getByRole("button", { name: "Close", exact: true })).toBeVisible();
+  await modal.getByRole("button", { name: "Download ZIP", exact: true }).click();
+  await expect(modal.getByRole("button", { name: "Close", exact: true })).toBeVisible();
+  await expect(app.locator(".steam-modal")).toHaveCount(1);
+});
+
+test("The Updates page offers Discover when everything is up to date", async ({ page }) => {
+  await page.goto("/?preview=/deckyhub/updates&bridge=http://127.0.0.1:8643");
+  const app = mock(page);
+  await expect(app.getByRole("heading", { name: "Everything installed is up to date." })).toBeVisible();
+  await app.getByRole("button", { name: "Discover", exact: true }).click();
+  await expect(app.getByRole("heading", { name: "Discover", exact: true })).toBeVisible();
+});
+
+test("A stalled Decky install warns once its progress goes quiet, a finished one doesn't", async ({ page }) => {
+  // Stand-in for Decky Loader's WS bridge that tests can send progress events through.
+  await page.addInitScript(() => {
+    const listeners: Record<string, ((...args: unknown[]) => void)[]> = {};
+    Object.assign(window, {
+      __emit: (event: string, ...args: unknown[]) => [...(listeners[event] ?? [])].forEach((listener) => listener(...args)),
+      DeckyBackend: {
+        call: async () => undefined,
+        addEventListener: (event: string, listener: (...args: unknown[]) => void) => void (listeners[event] ??= []).push(listener),
+        removeEventListener: (event: string, listener: (...args: unknown[]) => void) => void (listeners[event] = (listeners[event] ?? []).filter((item) => item !== listener)),
+      },
+    });
+  });
+  await page.clock.install();
+  await mockMakoReleases(page, [makoRelease("plugin-v1.2.3", "a".repeat(64))]);
+  await page.goto("/?preview=/deckyhub/discover&bridge=http://127.0.0.1:8643");
+  const app = mock(page);
+  const frame = page.frames().find((candidate) => candidate !== page.mainFrame())!;
+  const emit = (event: string, name: string) => frame.evaluate(([event, name]) => (window as unknown as { __emit: (event: string, name: string) => void }).__emit(event, name), [event, name] as const);
+  const stalled = app.getByText("Decky couldn't finish installing MAKO - Frame Generation: Reload Decky and try again.");
+  const install = async () => {
+    await app.getByRole("button", { name: "/deckyhub/discover" }).click();
+    await app.getByRole("heading", { name: "MAKO Decky" }).locator("..").getByRole("button", { name: "Install v1.2.3", exact: true }).click();
+    await expect(app.locator(".qam-content")).toBeVisible();
+  };
+
+  await install();
+  await emit("loader/plugin_download_start", "MAKO - Frame Generation");
+  await emit("loader/plugin_download_finish", "MAKO - Frame Generation");
+  await page.clock.fastForward(60_000);
+  await expect(stalled).toHaveCount(0);
+
+  await install();
+  await emit("loader/plugin_download_start", "MAKO - Frame Generation");
+  await page.clock.fastForward(46_000);
+  await expect(stalled).toBeVisible();
+});
+
+test("A failed download shows its reason in the download window", async ({ page }) => {
+  const app = mock(page);
+  await app.getByRole("button", { name: "Download failed modal", exact: true }).click();
+  const modal = app.locator(".steam-modal");
+  await expect(modal.getByText("DeckyHub download failed", { exact: true })).toBeVisible();
+  await expect(modal.getByText("HTTP Error 404: Not Found", { exact: true })).toBeVisible();
+  await modal.getByRole("button", { name: "OK", exact: true }).click();
+  await expect(app.locator(".steam-modal")).toHaveCount(0);
+});
+
+test("Discover pages through more than 20 cards", async ({ page }) => {
+  const repos = Array.from({ length: 10 }, (_, index) => `e2e-paging/repo-${index}`);
+  for (const repo of repos) await bridgeCall(page, "add_custom_repo", repo);
+  try {
+    await page.goto("/?preview=/deckyhub/discover&bridge=http://127.0.0.1:8643");
+    const app = mock(page);
+    const previous = app.getByRole("button", { name: "Previous", exact: true });
+    const next = app.getByRole("button", { name: "Next", exact: true });
+    await expect(app.getByText(/^Page 1 of 2$/)).toBeVisible();
+    await expect(previous).toBeDisabled();
+    await next.click();
+    await expect(app.getByText(/^Page 2 of 2$/)).toBeVisible();
+    await expect(next).toBeDisabled();
+    await expect(app.getByRole("heading", { name: "e2e-paging/repo-9" })).toBeVisible();
+    await previous.click();
+    await expect(app.getByText(/^Page 1 of 2$/)).toBeVisible();
+  } finally {
+    for (const repo of repos) await bridgeCall(page, "remove_custom_repo", repo);
+  }
+});
+
+test("A repository added from search shows on Discover until it's removed", async ({ page }) => {
+  const repo = "e2e-add/plugin";
+  await page.route("https://api.github.com/search/repositories**", (route) => route.fulfill({ json: { items: [{ full_name: repo, description: "Test repository", stargazers_count: 1 }] } }));
+  await page.goto("/?preview=/deckyhub/repositories&bridge=http://127.0.0.1:8643");
+  const app = mock(page);
+  try {
+    await app.getByLabel("Search GitHub").fill("plugin");
+    await app.getByRole("button", { name: "Search", exact: true }).click();
+    await app.getByRole("heading", { name: repo }).locator("..").getByRole("button", { name: "Add", exact: true }).click();
+    await expect(app.getByRole("heading", { name: repo }).locator("..").getByRole("button", { name: "Added", exact: true })).toBeDisabled();
+    await expect(app.getByRole("button", { name: `Remove ${repo}`, exact: true })).toBeVisible();
+
+    await app.getByRole("button", { name: "/deckyhub/discover" }).click();
+    await expect(app.getByRole("heading", { name: repo })).toBeVisible();
+
+    await app.getByRole("button", { name: "/deckyhub/repositories" }).click();
+    await app.getByRole("button", { name: `Remove ${repo}`, exact: true }).click();
+    await app.locator(".steam-modal").getByRole("button", { name: "Remove", exact: true }).click();
+    await expect(app.getByRole("button", { name: `Remove ${repo}`, exact: true })).toHaveCount(0);
+
+    await app.getByRole("button", { name: "/deckyhub/discover" }).click();
+    await expect(app.getByRole("heading", { name: "MAKO Decky" })).toBeVisible();
+    await expect(app.getByRole("heading", { name: repo })).toHaveCount(0);
+  } finally {
+    await bridgeCall(page, "remove_custom_repo", repo);
+  }
+});
+
+test("Switching the language updates Settings and the Quick Access panel", async ({ page }) => {
+  await bridgeCall(page, "save_settings", defaultSettings);
+  try {
+    await page.goto("/?preview=/deckyhub/settings&bridge=http://127.0.0.1:8643");
+    const app = mock(page);
+    await app.getByLabel("Language").selectOption("ru");
+    await expect(app.getByLabel("Язык")).toBeVisible();
+    await app.getByRole("button", { name: "Quick Access widget", exact: true }).click();
+    await expect(app.locator(".qam-content").getByRole("button", { name: "Настройки", exact: true })).toBeVisible();
+
+    await app.getByRole("button", { name: "/deckyhub/settings" }).click();
+    await app.getByLabel("Язык").selectOption("auto");
+    await expect(app.getByLabel("Language")).toBeVisible();
+  } finally {
+    await bridgeCall(page, "save_settings", defaultSettings);
+  }
+});
+
+test("Switching DeckyHub's channel in its update window doesn't toast, and the panel button follows it", async ({ page }) => {
+  const deckyHubRelease = (tag: string, prerelease: boolean, day: string) => ({
+    tag_name: tag, prerelease, draft: false, published_at: `2026-01-${day}T00:00:00Z`, html_url: `https://github.com/mazillka/deckyhub-plugin/releases/tag/${tag}`,
+    assets: [{ name: `DeckyHub-${tag}.zip`, browser_download_url: `https://github.com/mazillka/deckyhub-plugin/releases/download/${tag}/DeckyHub-${tag}.zip`, digest: `sha256:${"e".repeat(64)}` }],
+  });
+  await page.route("https://api.github.com/repos/mazillka/deckyhub-plugin/releases?per_page=20", (route) =>
+    route.fulfill({ json: [deckyHubRelease("v9.9.9-rc.1", true, "02"), deckyHubRelease("v0.9.0", false, "01")] }),
+  );
+  await bridgeCall(page, "save_settings", defaultSettings);
+  try {
+    await page.goto("/?bridge=http://127.0.0.1:8643");
+    const app = mock(page);
+    const panel = app.locator(".qam-content");
+    await panel.getByRole("button", { name: "Check for Updates", exact: true }).click();
+    const modal = app.locator(".steam-modal");
+    await modal.getByLabel("Update Channel").selectOption("prerelease");
+    await expect(modal.getByRole("button", { name: "Update to v9.9.9-rc.1", exact: true })).toBeVisible();
+    await modal.getByRole("button", { name: "Check for Updates", exact: true }).click();
+    await expect(modal.getByRole("button", { name: "Check for Updates", exact: true })).toBeEnabled();
+    await modal.getByRole("button", { name: "Close", exact: true }).click();
+
+    await expect(panel.getByRole("button", { name: "Update to v9.9.9-rc.1", exact: true })).toBeVisible();
+    await expect(app.getByText(/DeckyHub update .* is available/)).toHaveCount(0);
+  } finally {
+    await bridgeCall(page, "save_settings", defaultSettings);
+  }
 });
