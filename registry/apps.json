@@ -118,6 +118,15 @@
       "category": "Frame Generation",
       "detect": { "type": "decky-plugin", "names": ["BGFX"] },
       "asset": { "include": [".zip"], "exclude": ["source"] }
+    },
+    {
+      "id": "themehub",
+      "name": "ThemeHub",
+      "description": "Console-style home screens and a theme hub for the Steam Deck.",
+      "repo": "Kaal31/benderthemes",
+      "category": "Customization",
+      "detect": { "type": "decky-plugin", "names": ["ThemeHub"] },
+      "asset": { "include": ["DeckHomeThemes", ".zip"], "exclude": ["source"] }
     }
   ]
 }
