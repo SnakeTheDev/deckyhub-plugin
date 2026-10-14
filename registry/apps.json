@@ -136,6 +136,15 @@
       "category": "Customization",
       "detect": { "type": "decky-plugin", "names": ["Spindeck"] },
       "asset": { "include": [".zip"], "exclude": ["source"] }
+    },
+    {
+      "id": "game-glance",
+      "name": "Game Glance",
+      "description": "Immersive game page with full-screen art, HowLongToBeat times, descriptions and store info.",
+      "repo": "michpalm/game-glance",
+      "category": "Customization",
+      "detect": { "type": "decky-plugin", "names": ["Game Glance"] },
+      "asset": { "include": [".zip"], "exclude": ["source"] }
     }
   ]
 }
