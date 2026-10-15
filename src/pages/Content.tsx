@@ -100,13 +100,21 @@ export function Content({ fullPage }: { fullPage?: View }) {
   }, []);
 
   // Decky Loader reports when an install it ran finishes; reload so the card
-  // picks up the new installed version (release data stays cached).
+  // picks up the new installed version (release data stays cached). Debounced
+  // so an "Update all" batch reloads once, not once per plugin.
   useEffect(() => {
     const backend = getDeckyBackend();
     if (!backend) return;
-    const onFinish = () => void load();
+    let timer = 0;
+    const onFinish = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => void load(), 1000);
+    };
     backend.addEventListener("loader/plugin_download_finish", onFinish);
-    return () => backend.removeEventListener("loader/plugin_download_finish", onFinish);
+    return () => {
+      window.clearTimeout(timer);
+      backend.removeEventListener("loader/plugin_download_finish", onFinish);
+    };
   }, []);
 
   useEffect(() => {

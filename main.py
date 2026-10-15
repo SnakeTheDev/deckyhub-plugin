@@ -88,7 +88,8 @@ class Plugin:
         self.settings_path.parent.mkdir(parents=True, exist_ok=True)
         self.settings_path.write_text(json.dumps(self.settings), encoding="utf-8")
 
-    def _scan_installed_plugins(self) -> list[tuple[Path, dict, str | None]]:
+    # Each plugin's (plugin.json, package.json or {}, repository), read once per scan.
+    def _scan_installed_plugins(self) -> list[tuple[dict, dict, str | None]]:
         plugins_dir = Path(decky.DECKY_HOME) / "plugins"
         scanned = []
         for manifest_path in plugins_dir.glob("*/plugin.json"):
@@ -96,7 +97,11 @@ class Plugin:
                 manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 continue
-            scanned.append((manifest_path, manifest, self._plugin_repository(manifest_path, manifest)))
+            try:
+                package = json.loads((manifest_path.parent / "package.json").read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                package = {}
+            scanned.append((manifest, package, self._plugin_repository(manifest, package)))
         return scanned
 
     def _installed_version(self, app: dict) -> str | None:
@@ -112,31 +117,21 @@ class Plugin:
             decky.logger.warning("Version check %s failed: %s", command, error)
             return "installed"
 
-    def _match_decky_plugin(self, rule: dict, installed_plugins: list[tuple[Path, dict, str | None]]) -> tuple[Path, dict] | None:
+    def _match_decky_plugin(self, rule: dict, installed_plugins: list[tuple[dict, dict, str | None]]) -> tuple[dict, dict] | None:
         names = {name.casefold() for name in rule.get("names", [])}
         expected_repo = str(rule.get("repo", "")).casefold()
-        for manifest_path, manifest, repo in installed_plugins:
+        for manifest, package, repo in installed_plugins:
             if manifest.get("name", "").casefold() in names or (expected_repo and repo == expected_repo):
-                return manifest_path, manifest
+                return manifest, package
         return None
 
-    def _decky_plugin_version(self, match: tuple[Path, dict] | None) -> str | None:
+    def _decky_plugin_version(self, match: tuple[dict, dict] | None) -> str | None:
         if not match:
             return None
-        manifest_path, manifest = match
-        if manifest.get("version"):
-            return str(manifest["version"])
-        try:
-            package = json.loads((manifest_path.parent / "package.json").read_text(encoding="utf-8"))
-            return str(package.get("version") or "installed")
-        except (OSError, json.JSONDecodeError):
-            return "installed"
+        manifest, package = match
+        return str(manifest.get("version") or package.get("version") or "installed")
 
-    def _plugin_repository(self, manifest_path: Path, manifest: dict) -> str | None:
-        try:
-            package = json.loads((manifest_path.parent / "package.json").read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            package = {}
+    def _plugin_repository(self, manifest: dict, package: dict) -> str | None:
         value = package.get("repository", manifest.get("repository"))
         if isinstance(value, dict):
             value = value.get("url")
@@ -158,7 +153,7 @@ class Plugin:
             if app.get("detect", {}).get("type") == "decky-plugin":
                 match = self._match_decky_plugin(app["detect"], installed_plugins)
                 installed[index] = self._decky_plugin_version(match)
-                plugin_names[index] = match[1].get("name") if match else None
+                plugin_names[index] = match[0].get("name") if match else None
             else:
                 command_checks.append((index, app))
         command_versions = await asyncio.gather(*(asyncio.to_thread(self._installed_version, app) for _, app in command_checks))

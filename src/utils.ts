@@ -423,7 +423,20 @@ export function notifyUpdates(apps: App[]) {
 // release has been seen mid-array), so sort by published date here.
 type Release = { tag: string; prerelease: boolean; publishedAt: string | null; url: string; assets: Asset[] };
 
-async function fetchReleases(repo: string, force: boolean): Promise<Release[]> {
+// Lookups for the same repo that overlap share one request.
+const inFlight = new Map<string, Promise<Release[]>>();
+
+function fetchReleases(repo: string, force: boolean): Promise<Release[]> {
+  const key = `${repo}:${force}`;
+  let request = inFlight.get(key);
+  if (!request) {
+    request = requestReleases(repo, force).finally(() => inFlight.delete(key));
+    inFlight.set(key, request);
+  }
+  return request;
+}
+
+async function requestReleases(repo: string, force: boolean): Promise<Release[]> {
   const cacheKey = `deckyhub-releases:${repo}`;
   const cached = readCache<Release[]>(cacheKey);
   if (cached && !force && Date.now() - cached.at < CACHE_TTL) return cached.data;
