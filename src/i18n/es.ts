@@ -161,6 +161,7 @@ export const es: Record<MessageKey, string> = {
   "repos.errNotFound": "No hay nada en esa URL. Comprueba que el repositorio sea público y tenga registry/apps.json en la rama main.",
   "repos.errNotRegistry": "Ese JSON no es un registro de DeckyHub ({error}).",
   "repos.errUnreachable": "No se pudo acceder a esa URL ({error}).",
+  "repos.errSsl": "Falló la conexión segura con esa URL ({error}). Suele ser un problema de red o de certificado, no un enlace incorrecto: inténtalo de nuevo.",
 
   "github.error": "La API de GitHub devolvió {status}",
   "release.noMatch": "No se encontró ninguna versión compatible.",

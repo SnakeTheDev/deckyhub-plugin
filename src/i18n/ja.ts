@@ -161,6 +161,7 @@ export const ja: Record<MessageKey, string> = {
   "repos.errNotFound": "その URL には何もありません。リポジトリが公開されているか、main ブランチに registry/apps.json があるか確認してください。",
   "repos.errNotRegistry": "その JSON は DeckyHub のレジストリではありません ({error})。",
   "repos.errUnreachable": "その URL に接続できませんでした ({error})。",
+  "repos.errSsl": "その URL への安全な接続に失敗しました ({error})。通常はリンクの問題ではなく、ネットワークまたは証明書の問題です。もう一度お試しください。",
 
   "github.error": "GitHub API がエラー {status} を返しました",
   "release.noMatch": "該当するリリースが見つかりません。",

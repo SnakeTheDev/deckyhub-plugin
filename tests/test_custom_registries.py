@@ -115,6 +115,40 @@ class CustomRegistryTests(unittest.TestCase):
             self.assertEqual([app["repo"] for app in plugin.apps], ["owner/official", "owner/custom"])
             self.assertEqual(plugin._load_settings()["customRegistries"], [CUSTOM_URL])
 
+    def test_add_maps_tls_failures_to_ssl_error(self):
+        from urllib.error import URLError
+        import ssl
+
+        with tempfile.TemporaryDirectory() as home:
+            plugin = self.plugin(home)
+            # urlopen wraps the real cause in URLError.reason, so that path must unwrap.
+            cases = {URLError(ssl.SSLCertVerificationError("self signed certificate")): "certificate could not be verified", URLError(ssl.SSLError("wrong version number")): "TLS handshake failed"}
+            for error, detail in cases.items():
+                with self.subTest(detail=detail):
+                    with patch.object(main, "fetch_remote_registry", fake_fetch({CUSTOM_URL: error})):
+                        result = asyncio.run(plugin.add_custom_registry(CUSTOM_URL))
+                    self.assertEqual((result["added"], result["reason"], result["detail"]), (False, "ssl-error", detail))
+
+    def test_add_downloads_the_new_registry_only_once(self):
+        # Adding used to fetch to validate, discard the payload, then re-download it
+        # during the reload - two requests, and a flaky second one lost the registry.
+        with tempfile.TemporaryDirectory() as home:
+            plugin = self.plugin(home)
+            calls = []
+
+            def counting(url, *args, **kwargs):
+                calls.append(url)
+                return parse_registry(payload("owner/custom")), json.dumps(payload("owner/custom"))
+
+            with patch.object(main, "fetch_remote_registry", counting):
+                result = asyncio.run(plugin.add_custom_registry(CUSTOM_URL))
+            self.assertTrue(result["added"])
+            self.assertEqual(calls.count(CUSTOM_URL), 1)
+            self.assertEqual(calls.count(REMOTE_REGISTRY_URL), 1)
+            # And the payload we already had is cached, so an offline restart still works.
+            self.assertEqual(json.loads(plugin._registry_cache_path(CUSTOM_URL).read_text(encoding="utf-8")), payload("owner/custom"))
+            self.assertEqual([app["repo"] for app in plugin.apps], ["owner/custom"])
+
     def test_add_reports_an_unloadable_url_without_raising(self):
         # A mistyped URL is ordinary user error: it must never reach the frontend
         # as a Python exception, or Decky wraps it as "PythonException: ...".

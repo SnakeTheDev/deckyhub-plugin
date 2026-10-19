@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import shutil
+import ssl
 import subprocess
 import sys
 import time
@@ -69,6 +70,10 @@ def _coerce_registry_urls(values) -> list[str]:
 def _registry_failure_reason(error: Exception) -> tuple[str, str]:
     if isinstance(error, HTTPError):
         return ("not-found", f"HTTP {error.code}") if error.code == 404 else ("unreachable", f"HTTP {error.code}")
+    # urlopen wraps the real cause in URLError.reason, so unwrap before looking for TLS.
+    cause = getattr(error, "reason", None) or error
+    if isinstance(cause, ssl.SSLError):
+        return ("ssl-error", "certificate could not be verified" if isinstance(cause, ssl.SSLCertVerificationError) else "TLS handshake failed")
     if isinstance(error, ValueError):
         return ("not-registry", str(error))
     return ("unreachable", str(error))
@@ -113,32 +118,37 @@ class Plugin:
                 decky.logger.error("Can't read %s, using defaults: %s", self.settings_path, error)
             return {**_coerce_settings({}), "customRepos": [], "customRegistries": [], "repoSettings": {}}
 
-    def _load_registry(self) -> list[dict]:
-        """Official registry first (GitHub -> cached copy -> bundled file), then any user-added ones."""
-        apps = self._fetch_registry(REMOTE_REGISTRY_URL, bundled=True)
+    def _load_registry(self, prefetched: dict[str, tuple[list[dict], str]] | None = None) -> list[dict]:
+        """Official registry first (GitHub -> cached copy -> bundled file), then any user-added ones.
+
+        `prefetched` maps a URL to a payload already downloaded this call, so adding a
+        registry reuses the fetch that validated it instead of asking for it twice.
+        """
+        prefetched = prefetched or {}
+        apps = self._fetch_registry(REMOTE_REGISTRY_URL, bundled=True, prefetched=prefetched.get(REMOTE_REGISTRY_URL))
         # First source wins: a user-added registry can add apps but never override
         # the detect rules or asset filters of an entry from the official registry.
         seen = {app["repo"].casefold() for app in apps}
         for url in self.settings.get("customRegistries", []):
-            for app in self._fetch_registry(url):
+            for app in self._fetch_registry(url, prefetched=prefetched.get(url)):
                 if app["repo"].casefold() not in seen:
                     seen.add(app["repo"].casefold())
                     apps.append(app)
         return apps
 
-    def _fetch_registry(self, url: str, bundled: bool = False) -> list[dict]:
+    def _fetch_registry(self, url: str, bundled: bool = False, prefetched: tuple[list[dict], str] | None = None) -> list[dict]:
         """One registry source: fetch it, cache it, else fall back to the cache and then the bundled file."""
         cache_path = self._registry_cache_path(url)
+        if prefetched is not None:
+            apps, text = prefetched
+            self._cache_registry(cache_path, text, url)
+            return apps
         try:
             apps, text = fetch_remote_registry(url)
         except (OSError, ValueError) as error:
             decky.logger.warning("Registry %s unavailable (%s); trying cached copy", url, error)
         else:
-            try:
-                cache_path.parent.mkdir(parents=True, exist_ok=True)
-                cache_path.write_text(text, encoding="utf-8")
-            except OSError as error:
-                decky.logger.warning("Could not cache registry %s: %s", url, error)
+            self._cache_registry(cache_path, text, url)
             decky.logger.info("Loaded %d repositories from %s", len(apps), url)
             return apps
         try:
@@ -149,6 +159,14 @@ class Plugin:
             return []
         decky.logger.warning("Using bundled registry")
         return load_registry(decky.DECKY_PLUGIN_DIR)
+
+    def _cache_registry(self, cache_path: Path, text: str, url: str) -> None:
+        """Best-effort: a registry that won't cache still works this session."""
+        try:
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            cache_path.write_text(text, encoding="utf-8")
+        except OSError as error:
+            decky.logger.warning("Could not cache registry %s: %s", url, error)
 
     def _registry_cache_path(self, url: str) -> Path:
         # The official registry keeps the plain documented name; user-added ones get
@@ -410,14 +428,16 @@ class Plugin:
         # Load it once before saving, so a dead or non-registry URL is reported here,
         # while the user is watching, instead of being skipped on every later start.
         try:
-            apps, _ = await asyncio.to_thread(fetch_remote_registry, url)
+            apps, text = await asyncio.to_thread(fetch_remote_registry, url)
         except (OSError, ValueError) as error:
             reason, detail = _registry_failure_reason(error)
             decky.logger.error("Can't load registry %s: %s", url, error)
             return {"added": False, "url": url, "reason": reason, "detail": detail}
         self.settings.setdefault("customRegistries", []).append(url)
         self._save_settings()
-        self.apps = await asyncio.to_thread(self._load_registry)
+        # Hand the payload we already have to the reload, so adding costs one request
+        # and leaves the new registry cached even if the reload hits a flaky network.
+        self.apps = await asyncio.to_thread(self._load_registry, {url: (apps, text)})
         decky.logger.info("Added registry %s with %d repositories", url, len(apps))
         return {"added": True, "url": url, "apps": len(apps)}
 

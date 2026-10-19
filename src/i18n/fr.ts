@@ -161,6 +161,7 @@ export const fr: Record<MessageKey, string> = {
   "repos.errNotFound": "Rien à cette URL. Vérifiez que le dépôt est public et contient registry/apps.json sur la branche main.",
   "repos.errNotRegistry": "Ce JSON n'est pas un registre DeckyHub ({error}).",
   "repos.errUnreachable": "Impossible d'atteindre cette URL ({error}).",
+  "repos.errSsl": "La connexion sécurisée à cette URL a échoué ({error}). C'est généralement un problème réseau ou de certificat, pas un lien erroné - réessayez.",
 
   "github.error": "L’API GitHub a renvoyé {status}",
   "release.noMatch": "Aucune version correspondante trouvée.",

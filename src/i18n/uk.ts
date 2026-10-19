@@ -161,6 +161,7 @@ export const uk: Record<MessageKey, string> = {
   "repos.errNotFound": "За цією URL нічого немає. Перевірте, чи репозиторій публічний і має registry/apps.json у гілці main.",
   "repos.errNotRegistry": "Цей JSON не є реєстром DeckyHub ({error}).",
   "repos.errUnreachable": "Не вдалося зв'язатися з цією URL ({error}).",
+  "repos.errSsl": "Не вдалося встановити безпечне з'єднання з цією URL ({error}). Зазвичай це проблема мережі або сертифіката, а не неправильне посилання - спробуйте ще раз.",
 
   "github.error": "GitHub API повернув {status}",
   "release.noMatch": "Відповідний реліз не знайдено.",

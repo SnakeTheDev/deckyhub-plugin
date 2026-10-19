@@ -161,6 +161,7 @@ export const zh: Record<MessageKey, string> = {
   "repos.errNotFound": "该网址下没有内容。请确认仓库是公开的，且在 main 分支中有 registry/apps.json。",
   "repos.errNotRegistry": "该 JSON 不是 DeckyHub 注册表（{error}）。",
   "repos.errUnreachable": "无法访问该网址（{error}）。",
+  "repos.errSsl": "与该网址的安全连接失败（{error}）。这通常是网络或证书问题，并非链接有误——请重试。",
 
   "github.error": "GitHub API 返回了 {status}",
   "release.noMatch": "未找到匹配的版本。",

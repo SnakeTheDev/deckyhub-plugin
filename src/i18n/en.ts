@@ -160,6 +160,7 @@ export const en = {
   "repos.errNotFound": "Nothing at that URL. Check the repository is public and has registry/apps.json on the main branch.",
   "repos.errNotRegistry": "That JSON isn't a DeckyHub registry ({error}).",
   "repos.errUnreachable": "Couldn't reach that URL ({error}).",
+  "repos.errSsl": "The secure connection to that URL failed ({error}). This is usually a network or certificate problem, not a bad link - try again.",
 
   "github.error": "GitHub API returned {status}",
   "release.noMatch": "No matching release found.",

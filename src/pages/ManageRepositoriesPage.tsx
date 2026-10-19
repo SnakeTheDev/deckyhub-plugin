@@ -26,6 +26,7 @@ const REGISTRY_ERROR: Record<string, MessageKey> = {
   "too-many": "repos.errTooMany",
   "not-found": "repos.errNotFound",
   "not-registry": "repos.errNotRegistry",
+  "ssl-error": "repos.errSsl",
   unreachable: "repos.errUnreachable",
 };
 
