@@ -153,6 +153,31 @@ export async function githubCoreQuota(): Promise<{ limit: number; remaining: num
 
 export const readableBytes = (bytes = 0) => (bytes > 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.ceil(bytes / 1024)} KB`);
 
+// Where a registry lives by convention: registry/apps.json on the default branch,
+// via GitHub's raw-content host. The Manage page takes "owner/repo" and expands it
+// to this, so adding a registry whose source is a GitHub repo is one short field.
+const GITHUB_REGISTRY_TEMPLATE = "https://raw.githubusercontent.com/{repo}/refs/heads/main/registry/apps.json";
+
+const REPOSITORY_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+
+export const registryUrlForRepo = (repo: string) => GITHUB_REGISTRY_TEMPLATE.replace("{repo}", repo.trim());
+
+export const isRepositoryName = (value: string) => REPOSITORY_PATTERN.test(value.trim());
+
+// Short, scannable label for a registry URL: "owner/repo" for GitHub raw URLs,
+// otherwise the host plus the file name. The Manage list shows this instead of the
+// full URL, with a dropdown to switch the whole list back to the real URLs.
+export function registryLabel(url: string): string {
+  try {
+    const { hostname, pathname } = new URL(url);
+    const parts = pathname.split("/").filter(Boolean);
+    if (hostname === "raw.githubusercontent.com" && parts.length >= 2) return `${parts[0]}/${parts[1]}`;
+    return parts.length ? `${hostname}/${parts[parts.length - 1]}` : hostname;
+  } catch {
+    return url;
+  }
+}
+
 export const statusKey = (app: App): MessageKey =>
   !app.installedVersion ? "filter.notInstalled" : app.updateAvailable ? "status.updateAvailable" : app.updateAvailable === false ? "status.upToDate" : "filter.installed";
 

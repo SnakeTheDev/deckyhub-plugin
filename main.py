@@ -19,7 +19,7 @@ PLUGIN_DIR = str(Path(__file__).resolve().parent)
 if PLUGIN_DIR not in sys.path:
     sys.path.insert(0, PLUGIN_DIR)
 
-from backend.registry import load_registry
+from backend.registry import MAX_CUSTOM_REGISTRIES, REMOTE_REGISTRY_URL, fetch_remote_registry, load_registry, parse_registry, validate_registry_url
 
 DEFAULT_DOWNLOAD_DIR = "/home/deck/Downloads"
 PLUGIN_DOWNLOAD_DIR = f"{DEFAULT_DOWNLOAD_DIR}/deckyhub"
@@ -45,6 +45,23 @@ def _coerce_github_token(value) -> str:
     return value.strip()[:255] if isinstance(value, str) else ""
 
 
+# User-added registry URLs, normalized, de-duplicated and capped. Invalid entries
+# are dropped rather than raised on: a settings file edited by hand shouldn't stop
+# the plugin from starting, and add_custom_registry() is where typos get reported.
+def _coerce_registry_urls(values) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    urls: list[str] = []
+    for value in values:
+        try:
+            url = validate_registry_url(value)
+        except ValueError:
+            continue
+        if url not in urls:
+            urls.append(url)
+    return urls[:MAX_CUSTOM_REGISTRIES]
+
+
 def _coerce_settings(settings: dict) -> dict:
     return {
         "overwriteExisting": bool(settings.get("overwriteExisting", True)),
@@ -62,7 +79,7 @@ class Plugin:
     async def _main(self):
         self.settings_path = Path(decky.DECKY_PLUGIN_SETTINGS_DIR) / "settings.json"
         self.settings = self._load_settings()
-        self.apps = load_registry(decky.DECKY_PLUGIN_DIR)
+        self.apps = await asyncio.to_thread(self._load_registry)
         self.downloads: dict[str, dict] = {}
         self.cancelled: set[str] = set()
         self.download_queue: asyncio.Queue = asyncio.Queue()
@@ -76,12 +93,58 @@ class Plugin:
             return {
                 **_coerce_settings(settings),
                 "customRepos": [repo for repo in repos if isinstance(repo, str) and REPOSITORY_NAME.fullmatch(repo)],
+                "customRegistries": _coerce_registry_urls(settings.get("customRegistries", [])),
                 "repoSettings": settings.get("repoSettings", {}) if isinstance(settings.get("repoSettings"), dict) else {},
             }
         except (AttributeError, OSError, json.JSONDecodeError) as error:
             if self.settings_path.exists():
                 decky.logger.error("Can't read %s, using defaults: %s", self.settings_path, error)
-            return {**_coerce_settings({}), "customRepos": [], "repoSettings": {}}
+            return {**_coerce_settings({}), "customRepos": [], "customRegistries": [], "repoSettings": {}}
+
+    def _load_registry(self) -> list[dict]:
+        """Official registry first (GitHub -> cached copy -> bundled file), then any user-added ones."""
+        apps = self._fetch_registry(REMOTE_REGISTRY_URL, bundled=True)
+        # First source wins: a user-added registry can add apps but never override
+        # the detect rules or asset filters of an entry from the official registry.
+        seen = {app["repo"].casefold() for app in apps}
+        for url in self.settings.get("customRegistries", []):
+            for app in self._fetch_registry(url):
+                if app["repo"].casefold() not in seen:
+                    seen.add(app["repo"].casefold())
+                    apps.append(app)
+        return apps
+
+    def _fetch_registry(self, url: str, bundled: bool = False) -> list[dict]:
+        """One registry source: fetch it, cache it, else fall back to the cache and then the bundled file."""
+        cache_path = self._registry_cache_path(url)
+        try:
+            apps, text = fetch_remote_registry(url)
+        except (OSError, ValueError) as error:
+            decky.logger.warning("Registry %s unavailable (%s); trying cached copy", url, error)
+        else:
+            try:
+                cache_path.parent.mkdir(parents=True, exist_ok=True)
+                cache_path.write_text(text, encoding="utf-8")
+            except OSError as error:
+                decky.logger.warning("Could not cache registry %s: %s", url, error)
+            decky.logger.info("Loaded %d repositories from %s", len(apps), url)
+            return apps
+        try:
+            return parse_registry(json.loads(cache_path.read_text(encoding="utf-8")))
+        except (OSError, ValueError):
+            decky.logger.warning("No cached copy of %s", url)
+        if not bundled:
+            return []
+        decky.logger.warning("Using bundled registry")
+        return load_registry(decky.DECKY_PLUGIN_DIR)
+
+    def _registry_cache_path(self, url: str) -> Path:
+        # The official registry keeps the plain documented name; user-added ones get
+        # their own file per URL so one bad registry can't clobber another's cache.
+        directory = Path(decky.DECKY_PLUGIN_SETTINGS_DIR)
+        if url == REMOTE_REGISTRY_URL:
+            return directory / "registry-cache.json"
+        return directory / "registries" / f"{hashlib.sha256(url.encode('utf-8')).hexdigest()[:16]}.json"
 
     def _save_settings(self):
         self.settings_path.parent.mkdir(parents=True, exist_ok=True)
@@ -199,6 +262,7 @@ class Plugin:
         self.settings = {
             **_coerce_settings(settings),
             "customRepos": getattr(self, "settings", {}).get("customRepos", []),
+            "customRegistries": getattr(self, "settings", {}).get("customRegistries", []),
             "repoSettings": getattr(self, "settings", {}).get("repoSettings", {}),
         }
         self._save_settings()
@@ -314,6 +378,47 @@ class Plugin:
             self._save_settings()
         decky.logger.info("Imported %s from %s", added or "nothing new", source)
         return {"added": added}
+
+    async def get_custom_registries(self):
+        return {"registries": [{"url": url} for url in self.settings.get("customRegistries", [])]}
+
+    async def add_custom_registry(self, url: str):
+        try:
+            url = validate_registry_url(url)
+        except ValueError as error:
+            decky.logger.error("Refused to add invalid registry URL %r", url)
+            raise ValueError(str(error)) from error
+        if url == REMOTE_REGISTRY_URL or url in self.settings.get("customRegistries", []):
+            return {"added": False, "url": url}
+        if len(self.settings.get("customRegistries", [])) >= MAX_CUSTOM_REGISTRIES:
+            raise ValueError(f"You can track at most {MAX_CUSTOM_REGISTRIES} custom registries")
+        # Load it once before saving, so a dead or non-registry URL fails here with
+        # a message the UI can show, instead of being silently skipped on every start.
+        try:
+            apps, _ = await asyncio.to_thread(fetch_remote_registry, url)
+        except (OSError, ValueError) as error:
+            decky.logger.error("Can't load registry %s: %s", url, error)
+            raise ValueError(f"Couldn't load that registry: {error}") from error
+        self.settings.setdefault("customRegistries", []).append(url)
+        self._save_settings()
+        self.apps = await asyncio.to_thread(self._load_registry)
+        decky.logger.info("Added registry %s with %d repositories", url, len(apps))
+        return {"added": True, "url": url, "apps": len(apps)}
+
+    async def remove_custom_registry(self, url: str):
+        stored = next((item for item in self.settings.get("customRegistries", []) if item == url.strip()), None)
+        if stored is None:
+            return {"removed": False, "url": url}
+        self.settings["customRegistries"].remove(stored)
+        self._save_settings()
+        self.apps = await asyncio.to_thread(self._load_registry)
+        decky.logger.info("Removed registry %s", stored)
+        return {"removed": True, "url": stored}
+
+    async def refresh_registry(self):
+        self.apps = await asyncio.to_thread(self._load_registry)
+        decky.logger.info("Reloaded %d registry entries", len(self.apps))
+        return {"apps": len(self.apps)}
 
     async def download_asset(self, asset: dict, repo: str | None = None):
         try:

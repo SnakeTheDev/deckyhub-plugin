@@ -46,4 +46,6 @@ export type SearchRepo = { full_name: string; description?: string; stargazers_c
 
 export type ManagedRepo = { repo: string };
 
+export type ManagedRegistry = { url: string };
+
 export type RepoPreference = { channel: "stable" | "prerelease"; assetFilter: string[] };

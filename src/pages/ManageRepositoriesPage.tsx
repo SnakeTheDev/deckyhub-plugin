@@ -1,15 +1,19 @@
 import { FileSelectionType, openFilePicker, toaster } from "@decky/api";
-import { DialogButtonPrimary as Button, ConfirmModal, Focusable, PanelSection, PanelSectionRow, showModal, TextField } from "@decky/ui";
+import { DialogButtonPrimary as Button, ConfirmModal, DropdownItem, Focusable, PanelSection, PanelSectionRow, showModal, TextField } from "@decky/ui";
 import { FocusableGrid } from "../components/FocusableGrid";
 import { RateLimitBanner } from "../components/RateLimitBanner";
 import { useEffect, useState } from "react";
-import { FaArrowLeft, FaArrowRight, FaCheck, FaFileExport, FaFileImport, FaPlus, FaSearch, FaTimes, FaTrash } from "react-icons/fa";
-import { addCustomRepo, exportCustomRepos, getApps, getCustomRepos, importCustomRepos, REGISTRY_UPDATED, removeCustomRepo } from "../api";
+import { FaArrowLeft, FaArrowRight, FaCheck, FaFileExport, FaFileImport, FaPlus, FaRedo, FaSearch, FaTimes, FaTrash } from "react-icons/fa";
+import { addCustomRegistry, addCustomRepo, exportCustomRepos, getApps, getCustomRegistries, getCustomRepos, importCustomRepos, REGISTRY_UPDATED, refreshRegistry, removeCustomRegistry, removeCustomRepo } from "../api";
 import { useT } from "../i18n";
-import type { ManagedRepo, SearchRepo } from "../types";
-import { compactButtonStyle, githubFetch, githubResponseError, log, sectionDividerStyle } from "../utils";
+import type { ManagedRegistry, ManagedRepo, SearchRepo } from "../types";
+import { compactButtonStyle, githubFetch, githubResponseError, isRepositoryName, log, registryLabel, registryUrlForRepo, sectionDividerStyle } from "../utils";
 
 const RESULTS_PER_PAGE = 5;
+
+// How the user points at a registry: a GitHub "owner/repo" (expanded to the raw
+// URL by registryUrlForRepo), or any full HTTPS URL to a registry .json file.
+type RegistrySource = "repo" | "url";
 
 export function ManageRepositoriesPage() {
   const t = useT();
@@ -20,9 +24,15 @@ export function ManageRepositoriesPage() {
   const [searchError, setSearchError] = useState<string | null>(null);
   const [customRepos, setCustomRepos] = useState<ManagedRepo[]>([]);
   const [existingRepos, setExistingRepos] = useState<Set<string>>(new Set());
+  const [registries, setRegistries] = useState<ManagedRegistry[]>([]);
+  const [registrySource, setRegistrySource] = useState<RegistrySource>("repo");
+  const [registryValue, setRegistryValue] = useState("");
+  const [registryBusy, setRegistryBusy] = useState(false);
+  const [showUrls, setShowUrls] = useState(false);
 
   const refreshRepos = () => {
     void getCustomRepos().then((result) => setCustomRepos(result.repos));
+    void getCustomRegistries().then((result) => setRegistries(result.registries));
     void getApps().then((result) => setExistingRepos(new Set(result.apps.map((app) => app.repo.toLowerCase()))));
   };
 
@@ -73,6 +83,60 @@ export function ManageRepositoriesPage() {
         onOK={() => void remove(repo)}
       />
     );
+
+  const addRegistry = async () => {
+    const value = registryValue.trim();
+    if (!value || registryBusy) return;
+    if (registrySource === "repo" && !isRepositoryName(value)) {
+      toaster.toast({ title: "DeckyHub", body: t("repos.badRepoFormat", { value }) });
+      return;
+    }
+    setRegistryBusy(true);
+    try {
+      const result = await addCustomRegistry(registrySource === "repo" ? registryUrlForRepo(value) : value);
+      setRegistryValue("");
+      refreshRepos();
+      window.dispatchEvent(new Event(REGISTRY_UPDATED));
+      toaster.toast({ title: "DeckyHub", body: result.added ? t("repos.registryAdded", { apps: result.apps ?? 0 }) : t("repos.registryAlreadyAdded") });
+    } catch (error) {
+      log(`Adding registry failed: ${error}`);
+      toaster.toast({ title: "DeckyHub", body: t("repos.registryFailed", { error: String(error) }) });
+    } finally {
+      setRegistryBusy(false);
+    }
+  };
+
+  const removeRegistry = async (url: string) => {
+    await removeCustomRegistry(url);
+    refreshRepos();
+    window.dispatchEvent(new Event(REGISTRY_UPDATED));
+  };
+
+  const confirmRemoveRegistry = (url: string) =>
+    showModal(
+      <ConfirmModal
+        strTitle={t("repos.removeRegistryTitle")}
+        strDescription={t("repos.removeRegistryDesc", { url })}
+        strOKButtonText={t("repos.removeConfirm")}
+        bDestructiveWarning
+        onOK={() => void removeRegistry(url)}
+      />
+    );
+
+  const reloadRegistries = async () => {
+    if (registryBusy) return;
+    setRegistryBusy(true);
+    try {
+      await refreshRegistry();
+      refreshRepos();
+      window.dispatchEvent(new Event(REGISTRY_UPDATED));
+    } catch (error) {
+      log(`Refreshing registries failed: ${error}`);
+      toaster.toast({ title: "DeckyHub", body: t("repos.registryFailed", { error: String(error) }) });
+    } finally {
+      setRegistryBusy(false);
+    }
+  };
 
   const exportList = async () => {
     const result = await exportCustomRepos();
@@ -185,6 +249,77 @@ export function ManageRepositoriesPage() {
           </PanelSectionRow>
         ))}
         {!customRepos.length && <PanelSectionRow>{t("repos.noCustomRepos")}</PanelSectionRow>}
+      </PanelSection>
+
+      <div aria-hidden style={sectionDividerStyle} />
+
+      <PanelSection title={t("repos.customRegistries")}>
+        <PanelSectionRow>
+          <DropdownItem
+            layout="inline"
+            bottomSeparator="none"
+            label={t("repos.addFrom")}
+            rgOptions={[
+              { label: t("repos.addFromRepo"), data: "repo" },
+              { label: t("repos.addFromUrl"), data: "url" },
+            ]}
+            selectedOption={registrySource}
+            onChange={({ data }) => setRegistrySource(String(data) as RegistrySource)}
+          />
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <Focusable flow-children="right" style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <TextField
+                label={registrySource === "repo" ? t("repos.registryRepo") : t("repos.registryUrl")}
+                value={registryValue}
+                onChange={(event) => setRegistryValue(event.currentTarget.value)}
+              />
+            </div>
+            <div style={{ flex: "0 0 160px", paddingTop: 24 }}>
+              <Button style={compactButtonStyle} onClick={() => void addRegistry()} disabled={registryBusy}>
+                <FaPlus /> {registryBusy ? t("repos.registryLoading") : t("repos.addRegistry")}
+              </Button>
+            </div>
+          </Focusable>
+        </PanelSectionRow>
+        {registries.length > 0 && (
+          <PanelSectionRow>
+            <Focusable flow-children="right" style={{ display: "flex", gap: 12 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <Button style={compactButtonStyle} disabled={registryBusy} onClick={() => void reloadRegistries()}>
+                  <FaRedo /> {t("repos.refreshRegistries")}
+                </Button>
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <DropdownItem
+                  layout="inline"
+                  bottomSeparator="none"
+                  label={t("repos.showAs")}
+                  rgOptions={[
+                    { label: t("repos.showAsName"), data: "name" },
+                    { label: t("repos.showAsUrl"), data: "url" },
+                  ]}
+                  selectedOption={showUrls ? "url" : "name"}
+                  onChange={({ data }) => setShowUrls(String(data) === "url")}
+                />
+              </div>
+            </Focusable>
+          </PanelSectionRow>
+        )}
+        {registries.map((item) => (
+          <PanelSectionRow key={item.url}>
+            <Focusable flow-children="right" style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <div style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>{showUrls ? item.url : registryLabel(item.url)}</div>
+              <div style={{ flex: "0 0 120px" }}>
+                <Button style={compactButtonStyle} onClick={() => confirmRemoveRegistry(item.url)}>
+                  <FaTrash /> {t("repos.removeRegistry")}
+                </Button>
+              </div>
+            </Focusable>
+          </PanelSectionRow>
+        ))}
+        {!registries.length && <PanelSectionRow>{t("repos.noCustomRegistries")}</PanelSectionRow>}
       </PanelSection>
     </>
   );
