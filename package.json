@@ -1,6 +1,6 @@
 {
   "name": "deckyhub",
-  "version": "2.0.2-rc.18",
+  "version": "2.0.2-rc.19",
   "description": "Discover, track, and safely download GitHub releases for Steam Deck tools from Gaming Mode.",
   "author": "Andrii Shevchuk-Yuhanets",
   "private": true,
