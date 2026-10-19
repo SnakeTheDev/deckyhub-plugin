@@ -25,6 +25,7 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm run typecheck
           pnpm run build
+          pnpm run test:frontend
           python3 -m unittest discover -s tests
       - run: |
           npm ci --prefix devtools/decky-mock
