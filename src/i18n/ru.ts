@@ -135,6 +135,7 @@ export const ru: Record<MessageKey, string> = {
   "toast.installStalledBody": "Перезагрузите Decky и попробуйте снова.",
   "dl.failedTitle": "Не удалось скачать в DeckyHub",
   "dl.failedNoReason": "Загрузка не удалась без указания причины.",
+  "dl.missing": "Эта загрузка больше не отслеживается. Проверьте папку deckyhub в «Загрузках».",
   "dl.progress": "{percent}% · {received} из {total}",
   "repos.addedToast": "{repo} добавлен в Обзор.",
   "repos.alreadyAdded": "{repo} уже есть в DeckyHub.",

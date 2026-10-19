@@ -2,6 +2,9 @@ import { fetchNoCors, toaster } from "@decky/api";
 import { getSettings, logFrontend } from "./api";
 import { en, type MessageKey, type TFunc } from "./i18n/en";
 import type { App, AppReleaseOption, Asset, DeckyHubRelease, DeckyHubReleaseOption, RepoPreference, UpdateChannel } from "./types";
+import { compareVersions, displayVersion, inChannel, normalizeVersion } from "./version";
+
+export { displayVersion, inChannel, normalizeVersion };
 
 // GitHub's unauthenticated core API allows 60 requests/hour per IP, easy to
 // burn through when Discover/Updates check every tracked app. Release lists
@@ -110,7 +113,10 @@ function githubHeaders(): Record<string, string> {
 let tokenLoaded: Promise<void> | null = null;
 
 export async function githubFetch(url: string) {
-  tokenLoaded ??= getSettings().then((settings) => setGithubToken(settings.githubToken || ""), () => undefined);
+  // A failed settings read is retried on the next call rather than kept.
+  tokenLoaded ??= getSettings().then((settings) => setGithubToken(settings.githubToken || ""), () => {
+    tokenLoaded = null;
+  });
   await tokenLoaded;
   return fetchNoCors(url, { headers: githubHeaders(), signal: AbortSignal.timeout(15_000) });
 }
@@ -181,16 +187,6 @@ function writeCache(key: string, data: unknown): void {
   }
 }
 
-export const normalizeVersion = (value: string) => value.trim().replace(/^v/i, "");
-
-// One display format for every version: "v" + the version number, keeping a
-// pre-release suffix — "plugin-v3.3.0" → v3.3.0, "Release-0.7.5" → v0.7.5,
-// "1.0.3-rc.2" → v1.0.3-rc.2. Anything without a version number is shown as is.
-export function displayVersion(value: string) {
-  const match = value.match(/(\d+(?:\.\d+)+)(-[0-9A-Za-z.-]+)?/);
-  return match ? `v${match[1]}${match[2] ?? ""}` : value;
-}
-
 // Shared by both version pickers: label each release with "v" plus
 // an "(installed)"/"(latest)" suffix — items[0] is the newest since every
 // release-list fetch above sorts by publish date before returning.
@@ -208,41 +204,6 @@ export function buildVersionOptions<T extends { tag: string }>(items: T[], insta
 // global `utilities/install_plugin` route to tell its native installer what
 // kind of operation this is.
 export const PLUGIN_INSTALL_TYPE = { INSTALL: 0, REINSTALL: 1, UPDATE: 2, DOWNGRADE: 3 } as const;
-
-// The version number and pre-release suffix inside a tag or version string —
-// the same part displayVersion() shows: "plugin-v3.3.0" → 3.3.0,
-// "1.0.3-rc.2" → 1.0.3 + "rc.2". Null when there's no dotted version number.
-function parseVersion(value: string) {
-  const match = value.match(/(\d+(?:\.\d+)+)(?:-([0-9A-Za-z.-]+))?/);
-  return match ? { release: match[1].split(".").map(Number), prerelease: match[2] ?? null } : null;
-}
-
-// A version with no pre-release suffix outranks the same release number with
-// one ("1.0.3" > "1.0.3-rc.9"); between two suffixed versions, compare their
-// trailing number ("rc.2" > "rc.1"), falling back to plain string order if a
-// suffix doesn't end in one (covers anything other than "-rc.N" gracefully).
-function comparePrerelease(target: string | null, current: string | null): number {
-  if (target === current) return 0;
-  if (target === null) return 1;
-  if (current === null) return -1;
-  const targetNumber = Number(target.match(/(\d+)$/)?.[1]);
-  const currentNumber = Number(current.match(/(\d+)$/)?.[1]);
-  if (!Number.isNaN(targetNumber) && !Number.isNaN(currentNumber) && targetNumber !== currentNumber) return targetNumber > currentNumber ? 1 : -1;
-  return target > current ? 1 : target < current ? -1 : 0;
-}
-
-// 1 / -1 / 0 as target is newer / older / the same as current, or null when
-// either has no version number. Used for DeckyHub itself and every tracked
-// app, so pre-release suffixes count everywhere (rc.1 → rc.2 → final).
-function compareVersions(target: string, current: string): number | null {
-  const a = parseVersion(target), b = parseVersion(current);
-  if (!a || !b) return null;
-  for (let i = 0; i < Math.max(a.release.length, b.release.length); i++) {
-    const diff = (a.release[i] || 0) - (b.release[i] || 0);
-    if (diff) return Math.sign(diff);
-  }
-  return comparePrerelease(a.prerelease, b.prerelease);
-}
 
 export function resolveDeckyHubInstallType(latestVersion: string, installedVersion: string): 1 | 2 | 3 {
   const cmp = compareVersions(latestVersion, installedVersion) ?? 1;
@@ -440,16 +401,16 @@ async function requestReleases(repo: string, force: boolean): Promise<Release[]>
   const cacheKey = `deckyhub-releases:${repo}`;
   const cached = readCache<Release[]>(cacheKey);
   if (cached && !force && Date.now() - cached.at < CACHE_TTL) return cached.data;
-  let response: Response;
+  let body: unknown;
   try {
-    response = await githubFetch(`https://api.github.com/repos/${repo}/releases?per_page=20`);
+    const response = await githubFetch(`https://api.github.com/repos/${repo}/releases?per_page=20`);
     if (!response.ok) throw await githubResponseError(response);
+    body = await response.json();
   } catch (error) {
     // Older releases beat an error card; a rate limit still raises the banner.
     if (cached) return cached.data;
     throw error;
   }
-  const body = await response.json();
   const releases: Release[] = (Array.isArray(body) ? body : [])
     .filter((item: any) => !item.draft)
     .map((item: any) => ({
@@ -485,7 +446,7 @@ export function listDeckyHubReleases(force = false): Promise<{ items: DeckyHubRe
 // Newest release on the given channel for the QAM "Update" button.
 export async function latestDeckyHubRelease(channel: UpdateChannel): Promise<DeckyHubRelease> {
   const { items, error } = await listDeckyHubReleases();
-  const release = items.find((item) => item.prerelease === (channel === "prerelease"));
+  const release = items.find((item) => inChannel(item, channel));
   return release?.asset ? { version: release.tag, asset: release.asset } : { error: error ?? tr("release.noChecksum") };
 }
 
@@ -503,7 +464,7 @@ export function listAppReleases(app: App, preference?: RepoPreference, force = f
 export async function hydrate(app: App, force: boolean, preference?: RepoPreference): Promise<App> {
   const channel: UpdateChannel = preference?.channel ?? "stable";
   const { items, error } = await listAppReleases(app, preference, force);
-  const release = items.find((item) => item.prerelease === (channel === "prerelease"));
+  const release = items.find((item) => inChannel(item, channel));
   if (!release) return { ...app, channel, error: error ?? tr("release.noMatch") };
   return {
     ...app,

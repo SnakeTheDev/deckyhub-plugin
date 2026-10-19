@@ -111,12 +111,6 @@ test("download modal actions use the full modal width", async ({ page }) => {
   await expectFullWidth("OK");
 });
 
-test("direct preview URLs render the requested page", async ({ page }) => {
-  await page.goto("/?preview=/deckyhub/discover&bridge=http://127.0.0.1:8643");
-
-  await expect(mock(page).getByRole("heading", { name: "Discover", exact: true })).toBeVisible();
-});
-
 test("Discover keeps search and status on one row", async ({ page }) => {
   await page.goto("/?preview=/deckyhub/discover&bridge=http://127.0.0.1:8643");
   const app = mock(page);
@@ -142,14 +136,6 @@ test("Discover keeps its refresh action beside the description", async ({ page }
   const [descriptionBox, refreshBox] = await Promise.all([description.boundingBox(), refresh.boundingBox()]);
   expect(Math.abs(descriptionBox!.y - refreshBox!.y)).toBeLessThan(20);
   expect(refreshBox!.x).toBeGreaterThan(descriptionBox!.x);
-});
-
-test("Repositories page renders Add & Manage directly, with no tabs", async ({ page }) => {
-  await page.goto("/?preview=/deckyhub/repositories&bridge=http://127.0.0.1:8643");
-  const app = mock(page);
-
-  await expect(app.getByLabel("Search GitHub")).toBeVisible();
-  await expect(app.getByRole("button", { name: "Repository Settings", exact: true })).toHaveCount(0);
 });
 
 test("Repository search and action share one row", async ({ page }) => {
@@ -243,22 +229,6 @@ test("Export Logs zips the backend log into Downloads", async ({ page }) => {
   rmSync(downloads, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
-test("DeckyHub offers to reinstall the matching version and keeps its release page", async ({ page }) => {
-  const deckyHubRelease = {
-    tag_name: deckyHubTag,
-    prerelease: false,
-    html_url: `https://github.com/mazillka/deckyhub-plugin/releases/tag/${deckyHubTag}`,
-    assets: [{ name: `DeckyHub-${deckyHubTag}.zip`, browser_download_url: `https://github.com/mazillka/deckyhub-plugin/releases/download/${deckyHubTag}/DeckyHub-${deckyHubTag}.zip`, digest: `sha256:${"a".repeat(64)}` }],
-  };
-  await page.route("https://api.github.com/repos/mazillka/deckyhub-plugin/releases?per_page=20", (route) => route.fulfill({ json: [deckyHubRelease] }));
-  await page.goto("/?bridge=http://127.0.0.1:8643");
-  const app = mock(page);
-  await app.locator(".qam-content").getByRole("button", { name: "Check for Updates", exact: true }).click();
-  await expect(app.getByRole("button", { name: `Reinstall v${deckyHubVersion}`, exact: true })).toBeVisible();
-  await expect(app.getByRole("button", { name: "Download ZIP", exact: true })).toBeVisible();
-  await expect(app.getByRole("button", { name: "Release Page", exact: true })).toBeVisible();
-});
-
 test("DeckyHub automatically notifies about an available update", async ({ page }) => {
   const newerRelease = {
     tag_name: "v9.9.9",
@@ -296,30 +266,6 @@ test("DeckyHub doesn't advertise an older release as an available update", async
   await expect(app.locator(".qam-content").getByRole("button", { name: "Check for Updates", exact: true })).toBeVisible();
   await expect(app.getByText(/DeckyHub update v0\.9\.0 is available/)).toHaveCount(0);
   await app.locator(".qam-content").getByRole("button", { name: "Check for Updates", exact: true }).click();
-  await expect(app.getByRole("button", { name: "Downgrade to v0.9.0", exact: true })).toBeVisible();
-});
-
-test("DeckyHub version picker offers to downgrade to an older release", async ({ page }) => {
-  const installedRelease = {
-    tag_name: deckyHubTag,
-    prerelease: false,
-    html_url: `https://github.com/mazillka/deckyhub-plugin/releases/tag/${deckyHubTag}`,
-    assets: [{ name: `DeckyHub-${deckyHubTag}.zip`, browser_download_url: `https://github.com/mazillka/deckyhub-plugin/releases/download/${deckyHubTag}/DeckyHub-${deckyHubTag}.zip`, digest: `sha256:${"a".repeat(64)}` }],
-  };
-  const olderRelease = {
-    tag_name: "v0.9.0",
-    prerelease: false,
-    html_url: "https://github.com/mazillka/deckyhub-plugin/releases/tag/v0.9.0",
-    assets: [{ name: "DeckyHub-v0.9.0.zip", browser_download_url: "https://github.com/mazillka/deckyhub-plugin/releases/download/v0.9.0/DeckyHub-v0.9.0.zip", digest: `sha256:${"c".repeat(64)}` }],
-  };
-  await page.route("https://api.github.com/repos/mazillka/deckyhub-plugin/releases?per_page=20", (route) => route.fulfill({ json: [installedRelease, olderRelease] }));
-  await page.goto("/?bridge=http://127.0.0.1:8643");
-  const app = mock(page);
-  await app.locator(".qam-content").getByRole("button", { name: "Check for Updates", exact: true }).click();
-  await expect(app.getByRole("button", { name: `Reinstall v${deckyHubVersion}`, exact: true })).toBeVisible();
-
-  await app.getByLabel("Version").selectOption({ label: "v0.9.0" });
-
   await expect(app.getByRole("button", { name: "Downgrade to v0.9.0", exact: true })).toBeVisible();
 });
 
@@ -435,6 +381,7 @@ test("DeckyHub falls back to a clear message when automatic update can't reach D
   await app.getByRole("button", { name: `Reinstall v${deckyHubVersion}`, exact: true }).click();
 
   await expect(app.getByText("Automatic update is unavailable right now — use Download ZIP instead.")).toBeVisible();
+  await expect(app.getByRole("button", { name: "Download ZIP", exact: true })).toBeVisible();
 });
 
 test("DeckyHub's Reinstall closes its window and hands the release to Decky's installer", async ({ page }) => {
@@ -460,12 +407,14 @@ test("DeckyHub version picker re-filters by channel and leaves the channel as it
   const stableRelease = {
     tag_name: deckyHubTag,
     prerelease: false,
+    published_at: "2026-01-01T00:00:00Z",
     html_url: `https://github.com/mazillka/deckyhub-plugin/releases/tag/${deckyHubTag}`,
     assets: [{ name: `DeckyHub-${deckyHubTag}.zip`, browser_download_url: `https://github.com/mazillka/deckyhub-plugin/releases/download/${deckyHubTag}/DeckyHub-${deckyHubTag}.zip`, digest: `sha256:${"a".repeat(64)}` }],
   };
   const prereleaseRelease = {
     tag_name: "v999.0.0-beta",
     prerelease: true,
+    published_at: "2026-01-02T00:00:00Z",
     html_url: "https://github.com/mazillka/deckyhub-plugin/releases/tag/v999.0.0-beta",
     assets: [{ name: "DeckyHub-v999.0.0-beta.zip", browser_download_url: "https://github.com/mazillka/deckyhub-plugin/releases/download/v999.0.0-beta/DeckyHub-v999.0.0-beta.zip", digest: `sha256:${"d".repeat(64)}` }],
   };
@@ -479,6 +428,8 @@ test("DeckyHub version picker re-filters by channel and leaves the channel as it
 
   await expect(app.getByLabel("Version")).toHaveValue("v999.0.0-beta");
   await expect(app.locator(".steam-modal").getByRole("button", { name: "Update to v999.0.0-beta", exact: true })).toBeVisible();
+  // Pre-releases lists stable releases too, so a newer stable is never hidden.
+  await expect(app.getByLabel("Version").locator(`option[value="${deckyHubTag}"]`)).toHaveCount(1);
 
   // changeChannel() persists to the real (shared) settings.json via the dev
   // bridge, fire-and-forget from the UI's perspective — clicking the dropdown
@@ -1020,6 +971,7 @@ test("Reopening Details within the cache window doesn't re-fetch its release lis
 const makoReleases = [
   {
     tag_name: "plugin-v1.3.0",
+    published_at: "2026-01-02T00:00:00Z",
     prerelease: false,
     draft: false,
     html_url: "https://github.com/eugeniosegala/MAKO/releases/tag/plugin-v1.3.0",
@@ -1027,6 +979,7 @@ const makoReleases = [
   },
   {
     tag_name: "plugin-v1.2.3",
+    published_at: "2026-01-01T00:00:00Z",
     prerelease: false,
     draft: false,
     html_url: "https://github.com/eugeniosegala/MAKO/releases/tag/plugin-v1.2.3",
@@ -1034,6 +987,7 @@ const makoReleases = [
   },
   {
     tag_name: "plugin-v1.4.0-beta",
+    published_at: "2026-01-03T00:00:00Z",
     prerelease: true,
     draft: false,
     html_url: "https://github.com/eugeniosegala/MAKO/releases/tag/plugin-v1.4.0-beta",
@@ -1118,6 +1072,21 @@ test("Discover's card picks the newest pre-release by publish date, not array or
     const app = mock(page);
     const makoCard = app.getByRole("heading", { name: "MAKO Decky" }).locator("..");
     await expect(makoCard.getByText("Latest: v1.4.0-beta.2", { exact: true })).toBeVisible();
+  } finally {
+    await bridgeCall(page, "save_repo_settings", "eugeniosegala/MAKO", { channel: "stable", assetFilter: [] });
+  }
+});
+
+test("A card on the pre-release channel picks a stable release newer than its pre-releases", async ({ page }) => {
+  const beta = makoRelease("plugin-v1.4.0-beta.1", "a".repeat(64), "01");
+  await page.route("https://api.github.com/repos/eugeniosegala/MAKO/releases?per_page=20", (route) =>
+    route.fulfill({ json: [{ ...beta, prerelease: true }, makoRelease("plugin-v1.4.0", "b".repeat(64), "02")] }),
+  );
+  await bridgeCall(page, "save_repo_settings", "eugeniosegala/MAKO", { channel: "prerelease", assetFilter: [] });
+  try {
+    await page.goto("/?preview=/deckyhub/discover&bridge=http://127.0.0.1:8643");
+    const makoCard = mock(page).getByRole("heading", { name: "MAKO Decky" }).locator("..");
+    await expect(makoCard.getByText("Latest: v1.4.0", { exact: true })).toBeVisible();
   } finally {
     await bridgeCall(page, "save_repo_settings", "eugeniosegala/MAKO", { channel: "stable", assetFilter: [] });
   }

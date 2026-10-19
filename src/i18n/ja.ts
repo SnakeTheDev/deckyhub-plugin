@@ -135,6 +135,7 @@ export const ja: Record<MessageKey, string> = {
   "toast.installStalledBody": "Decky を再読み込みしてもう一度お試しください。",
   "dl.failedTitle": "DeckyHub のダウンロードに失敗しました",
   "dl.failedNoReason": "理由不明のままダウンロードに失敗しました。",
+  "dl.missing": "このダウンロードは追跡されなくなりました。ダウンロード内の deckyhub フォルダーを確認してください。",
   "dl.progress": "{percent}% · {received} / {total}",
   "repos.addedToast": "{repo} を「見つける」に追加しました。",
   "repos.alreadyAdded": "{repo} はすでに DeckyHub にあります。",

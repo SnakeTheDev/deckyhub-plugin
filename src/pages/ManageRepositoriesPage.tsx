@@ -49,6 +49,13 @@ export function ManageRepositoriesPage() {
     }
   };
 
+  // Backend refusals (e.g. a file outside /home/deck) come back as errors
+  // carrying their reason; show it instead of failing silently.
+  const showError = (error: unknown) => {
+    log(`Repository action failed: ${error}`);
+    toaster.toast({ title: "DeckyHub", body: String(error) });
+  };
+
   const add = async (repo: string) => {
     const result = await addCustomRepo(repo);
     if (result.added) {
@@ -72,7 +79,7 @@ export function ManageRepositoriesPage() {
         strDescription={t("repos.removeRepositoryDesc", { repo })}
         strOKButtonText={t("repos.removeConfirm")}
         bDestructiveWarning
-        onOK={() => void remove(repo)}
+        onOK={() => void remove(repo).catch(showError)}
       />
     );
 
@@ -82,7 +89,12 @@ export function ManageRepositoriesPage() {
   };
 
   const importList = async () => {
-    const file = await openFilePicker(FileSelectionType.FILE, "/home/deck/Downloads", true, false, undefined, ["json"]);
+    let file: { realpath: string };
+    try {
+      file = await openFilePicker(FileSelectionType.FILE, "/home/deck/Downloads", true, false, undefined, ["json"]);
+    } catch {
+      return; // Picker closed without a file.
+    }
     const result = await importCustomRepos(file.realpath);
     refreshRepos();
     if (result.added.length) window.dispatchEvent(new Event(REGISTRY_UPDATED));
@@ -141,7 +153,7 @@ export function ManageRepositoriesPage() {
                     </small>
                   </PanelSectionRow>
                   <PanelSectionRow>
-                    <Button style={compactButtonStyle} disabled={added} onClick={() => void add(repo.full_name)}>
+                    <Button style={compactButtonStyle} disabled={added} onClick={() => void add(repo.full_name).catch(showError)}>
                       {added ? <FaCheck /> : <FaPlus />} {added ? t("repos.added") : t("repos.add")}
                     </Button>
                   </PanelSectionRow>
@@ -159,12 +171,12 @@ export function ManageRepositoriesPage() {
           <PanelSectionRow>
             <Focusable flow-children="right" style={{ display: "flex", gap: 12 }}>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <Button style={compactButtonStyle} onClick={() => void exportList()}>
+                <Button style={compactButtonStyle} onClick={() => void exportList().catch(showError)}>
                   <FaFileExport /> {t("repos.export")}
                 </Button>
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <Button style={compactButtonStyle} onClick={() => void importList()}>
+                <Button style={compactButtonStyle} onClick={() => void importList().catch(showError)}>
                   <FaFileImport /> {t("repos.import")}
                 </Button>
               </div>

@@ -19,6 +19,7 @@ corepack enable
 pnpm install
 pnpm run typecheck
 pnpm run build
+pnpm run test:frontend
 pnpm run test:backend
 ```
 
@@ -51,7 +52,7 @@ Merge pull requests with **Squash and merge** so `main` keeps one commit per PR;
 
 The repository's `.githooks/pre-commit` hook blocks commits on `main`. Activate it once per checkout with `git config core.hooksPath .githooks`; protected branches on GitHub should enforce the same rule remotely.
 
-To release, bump `version` in `package.json` (the backend reads it at runtime; there is no second copy), then push a `v*` Git tag. The tag starts the GitHub Actions release workflow. It installs the locked packages, typechecks, builds, runs the backend test, runs the browser E2E suite in `devtools/decky-mock/`, packages the Decky plugin, and attaches `DeckyHub-v*.zip` to the GitHub release. Release-notes conventions are in the Release section of [AGENTS.md](AGENTS.md).
+To release, bump `version` in `package.json` (the backend reads it at runtime; there is no second copy), then push a `v*` Git tag. The tag starts the GitHub Actions release workflow. It fails unless the tag is `v` plus the `package.json` version. It installs the locked packages, typechecks, builds, runs the frontend and backend tests and the browser E2E suite in `devtools/decky-mock/`, and packages the Decky plugin with a read-only token; a separate publish job then attaches `DeckyHub-v*.zip` to the GitHub release. Release-notes conventions are in the Release section of [AGENTS.md](AGENTS.md).
 
 ## Security boundaries
 

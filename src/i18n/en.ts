@@ -134,6 +134,7 @@ export const en = {
   "toast.installStalledBody": "Reload Decky and try again.",
   "dl.failedTitle": "DeckyHub download failed",
   "dl.failedNoReason": "The download failed without a reported reason.",
+  "dl.missing": "This download is no longer tracked. Check the deckyhub folder in Downloads.",
   "dl.progress": "{percent}% · {received} of {total}",
   "repos.addedToast": "{repo} added to Discover.",
   "repos.alreadyAdded": "{repo} is already in DeckyHub.",

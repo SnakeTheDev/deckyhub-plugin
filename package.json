@@ -8,7 +8,8 @@
   "scripts": {
     "build": "rollup -c",
     "typecheck": "tsc --noEmit",
-    "test:backend": "python -m unittest discover -s tests"
+    "test:backend": "python -m unittest discover -s tests",
+    "test:frontend": "node --test tests/version.test.ts"
   },
   "dependencies": {
     "@decky/api": "^1.1.3",

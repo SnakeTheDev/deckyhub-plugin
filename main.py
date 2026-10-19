@@ -9,7 +9,7 @@ import re
 import zipfile
 from pathlib import Path
 from urllib.error import URLError
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 import decky
 
@@ -20,6 +20,18 @@ REPOSITORY_NAME = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 HIDEABLE_BUTTONS = ("downloadZip", "install", "update", "releasePage")
 SUPPORTED_LANGUAGES = {"auto", "en", "uk", "ru", "es", "de", "fr", "ja", "zh"}
 DEFAULT_COLUMNS_PER_ROW = 3
+ACTIVE_DOWNLOAD_STATES = ("queued", "downloading")
+
+
+# GitHub's release URLs redirect to its asset CDN; never follow one off HTTPS.
+class _HttpsOnlyRedirects(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not newurl.startswith("https://"):
+            raise RuntimeError(f"Refused a redirect to a non-HTTPS URL: {newurl}")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+_OPENER = build_opener(_HttpsOnlyRedirects)
 
 
 def _coerce_columns_per_row(value) -> int:
@@ -51,6 +63,15 @@ def _coerce_settings(settings: dict) -> dict:
     }
 
 
+def _coerce_repo_settings(values) -> dict:
+    values = values if isinstance(values, dict) else {}
+    asset_filter = values.get("assetFilter")
+    return {
+        "channel": "prerelease" if values.get("channel") == "prerelease" else "stable",
+        "assetFilter": [value for value in asset_filter if isinstance(value, str) and value.strip()][:10] if isinstance(asset_filter, list) else [],
+    }
+
+
 def parse_registry(payload: object) -> list[dict]:
     """Validate the portable registry format and ignore malformed records."""
     if not isinstance(payload, dict) or payload.get("schemaVersion") != 1 or not isinstance(payload.get("apps"), list):
@@ -73,11 +94,12 @@ class Plugin:
     def _load_settings(self) -> dict:
         try:
             settings = json.loads(self.settings_path.read_text(encoding="utf-8"))
-            repos = settings.get("customRepos", [])
+            repos = settings.get("customRepos")
+            repo_settings = settings.get("repoSettings")
             return {
                 **_coerce_settings(settings),
-                "customRepos": [repo for repo in repos if isinstance(repo, str) and REPOSITORY_NAME.fullmatch(repo)],
-                "repoSettings": settings.get("repoSettings", {}) if isinstance(settings.get("repoSettings"), dict) else {},
+                "customRepos": [repo for repo in repos if isinstance(repo, str) and REPOSITORY_NAME.fullmatch(repo)] if isinstance(repos, list) else [],
+                "repoSettings": {repo: _coerce_repo_settings(values) for repo, values in repo_settings.items() if REPOSITORY_NAME.fullmatch(repo)} if isinstance(repo_settings, dict) else {},
             }
         except (AttributeError, OSError, json.JSONDecodeError) as error:
             if self.settings_path.exists():
@@ -85,8 +107,14 @@ class Plugin:
             return {**_coerce_settings({}), "customRepos": [], "repoSettings": {}}
 
     def _save_settings(self):
+        # Write-then-rename, so a Deck losing power mid-save keeps the old file.
         self.settings_path.parent.mkdir(parents=True, exist_ok=True)
-        self.settings_path.write_text(json.dumps(self.settings), encoding="utf-8")
+        temp = self.settings_path.with_name(self.settings_path.name + ".tmp")
+        with open(temp, "w", encoding="utf-8") as file:
+            json.dump(self.settings, file)
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(temp, self.settings_path)
 
     # Each plugin's (plugin.json, package.json or {}, repository), read once per scan.
     def _scan_installed_plugins(self) -> list[tuple[dict, dict, str | None]]:
@@ -166,10 +194,7 @@ class Plugin:
         if not REPOSITORY_NAME.fullmatch(repo):
             decky.logger.error("Refused settings for invalid repository %r", repo)
             raise ValueError("Repository must be owner/name")
-        item = {
-            "channel": "prerelease" if values.get("channel") == "prerelease" else "stable",
-            "assetFilter": [value for value in values.get("assetFilter", []) if isinstance(value, str) and value.strip()][:10],
-        }
+        item = _coerce_repo_settings(values)
         self.settings["repoSettings"][repo] = item
         self._save_settings()
         decky.logger.info("Saved settings for %s: %s", repo, item)
@@ -200,12 +225,16 @@ class Plugin:
 
     async def clear_downloads(self):
         directory = Path(PLUGIN_DOWNLOAD_DIR)
+        # Files an active download is writing or about to write stay put.
+        active = {Path(path) for job in getattr(self, "downloads", {}).values() if job["state"] in ACTIVE_DOWNLOAD_STATES and job.get("path") for path in (job["path"], job["path"] + ".part")}
 
         def clear():
             if not directory.is_dir():
                 return 0
             removed = 0
             for entry in directory.iterdir():
+                if entry in active:
+                    continue
                 if entry.is_dir() and not entry.is_symlink():
                     shutil.rmtree(entry)
                 else:
@@ -309,7 +338,7 @@ class Plugin:
         try:
             name = self._validate_download_asset(asset, repo)
             for job_id, job in self.downloads.items():
-                if job.get("repo") == repo and job.get("url") == asset["url"] and job["state"] in ("queued", "downloading"):
+                if job.get("repo") == repo and job.get("url") == asset["url"] and job["state"] in ACTIVE_DOWNLOAD_STATES:
                     return {"jobId": job_id}
             target_dir = Path(PLUGIN_DOWNLOAD_DIR)
             target_dir.mkdir(parents=True, exist_ok=True)
@@ -318,7 +347,7 @@ class Plugin:
                 target = self._next_name(target)
             # Finished jobs are only read by their own progress window, which stops
             # polling once it has seen the final state, so drop them here.
-            self.downloads = {key: job for key, job in self.downloads.items() if job["state"] in ("queued", "downloading")}
+            self.downloads = {key: job for key, job in self.downloads.items() if job["state"] in ACTIVE_DOWNLOAD_STATES}
             job_id = f"{name}-{time.monotonic_ns()}"
             self.downloads[job_id] = {"state": "queued", "filename": target.name, "received": 0, "total": asset.get("size") or 0, "path": str(target), "error": None, "repo": repo, "url": asset["url"]}
             self.download_queue.put_nowait((job_id, asset, target))
@@ -357,6 +386,8 @@ class Plugin:
     def _download(self, job_id: str, asset: dict, target: Path):
         job, temp = self.downloads[job_id], target.with_name(target.name + ".part")
         try:
+            if job_id in self.cancelled:
+                raise InterruptedError("Download cancelled")
             job["state"] = "downloading"
             try:
                 self._download_with_urllib(job_id, asset, temp)
@@ -382,7 +413,7 @@ class Plugin:
     def _download_with_urllib(self, job_id: str, asset: dict, temp: Path):
         job = self.downloads[job_id]
         request = Request(asset["url"], headers={"User-Agent": "DeckyHub/0.2"})
-        with urlopen(request, timeout=30) as response, open(temp, "wb") as file:
+        with _OPENER.open(request, timeout=30) as response, open(temp, "wb") as file:
             job["total"] = int(response.headers.get("Content-Length") or job["total"] or 0)
             while chunk := response.read(64 * 1024):
                 if job_id in self.cancelled:
@@ -398,10 +429,15 @@ class Plugin:
         environment = os.environ.copy()
         environment.pop("LD_LIBRARY_PATH", None)
         environment.pop("LD_PRELOAD", None)
-        process = subprocess.Popen([curl, "--fail", "--location", "--silent", "--show-error", "--connect-timeout", "15", "--max-time", "300", "--output", str(temp), asset["url"]], stderr=subprocess.PIPE, text=True, env=environment)
+        process = subprocess.Popen([curl, "--fail", "--location", "--proto", "=https", "--proto-redir", "=https", "--silent", "--show-error", "--connect-timeout", "15", "--max-time", "300", "--output", str(temp), asset["url"]], stderr=subprocess.PIPE, text=True, env=environment)
         while process.poll() is None:
             if job_id in self.cancelled:
                 process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
                 raise InterruptedError("Download cancelled")
             job["received"] = temp.stat().st_size if temp.exists() else 0
             time.sleep(0.2)
@@ -417,5 +453,8 @@ class Plugin:
         return self.downloads.get(job_id, {"state": "missing"})
 
     async def cancel_download(self, job_id: str):
+        # Only active jobs: a finished job's id would otherwise stay in the set.
+        if self.downloads.get(job_id, {}).get("state") not in ACTIVE_DOWNLOAD_STATES:
+            return {"ok": False}
         self.cancelled.add(job_id)
         return {"ok": True}

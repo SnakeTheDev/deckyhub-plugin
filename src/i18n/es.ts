@@ -135,6 +135,7 @@ export const es: Record<MessageKey, string> = {
   "toast.installStalledBody": "Recarga Decky e inténtalo de nuevo.",
   "dl.failedTitle": "Error en la descarga de DeckyHub",
   "dl.failedNoReason": "La descarga falló sin indicar el motivo.",
+  "dl.missing": "Esta descarga ya no se sigue. Revisa la carpeta deckyhub en Descargas.",
   "dl.progress": "{percent}% · {received} de {total}",
   "repos.addedToast": "{repo} se añadió a Descubrir.",
   "repos.alreadyAdded": "{repo} ya está en DeckyHub.",

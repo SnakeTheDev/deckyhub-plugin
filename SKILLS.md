@@ -23,6 +23,16 @@ Use these project skills when working in this repository.
 
 Commands are in [AGENTS.md](AGENTS.md#commands).
 
+## Test hygiene
+
+Every test must be able to fail when the behavior it names breaks. Delete fake and redundant tests rather than keeping them for the count; when you touch a test file, clean up what you find there.
+
+- Fake: asserts only what a mock, fixture or `route.fulfill` stub was set up to return; checks a constant against itself; passes with the code under test removed or stubbed out; or catches every error so nothing can fail.
+- Mislabeled: the name says something different from what the test asserts (e.g. `..._defaults_to_false` asserting `True`). Rename it to match the code if the behavior is intended; otherwise fix the code.
+- Redundant: covers the same behavior and branch as another test with no new input or edge case, including a backend unit test duplicated by an E2E test (or the reverse) at no extra depth. Keep the cheaper or more specific one.
+- Before deleting, name the test that still covers the behavior, or confirm the behavior is gone. If nothing else covers it, rewrite the test so it can fail; don't delete it.
+- To check that a test is real, break the code it covers and confirm it fails, then revert.
+
 ## Browser tests and the mock
 
 - Mocked GitHub list endpoints (`/releases?per_page=20`, …) must return arrays, like the real API.

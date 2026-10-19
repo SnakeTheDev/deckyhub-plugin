@@ -135,6 +135,7 @@ export const fr: Record<MessageKey, string> = {
   "toast.installStalledBody": "Rechargez Decky et réessayez.",
   "dl.failedTitle": "Échec du téléchargement DeckyHub",
   "dl.failedNoReason": "Le téléchargement a échoué sans raison indiquée.",
+  "dl.missing": "Ce téléchargement n'est plus suivi. Vérifiez le dossier deckyhub dans Téléchargements.",
   "dl.progress": "{percent} % · {received} sur {total}",
   "repos.addedToast": "{repo} ajouté à Découvrir.",
   "repos.alreadyAdded": "{repo} est déjà dans DeckyHub.",

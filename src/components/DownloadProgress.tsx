@@ -63,6 +63,7 @@ function DownloadModal({
               <small style={{ color: "#8fcef4" }}>{state.total ? t("dl.progress", { percent: Math.round(progress), received: readableBytes(state.received), total: readableBytes(state.total) }) : t("dl.preparing")}</small>
             </div>
           )}
+          {state.state === "missing" && <div>{t("dl.missing")}</div>}
           {state.state === "error" && (
             <>
               <strong style={{ color: "#ff6b6b" }}>{t("dl.failedTitle")}</strong>

@@ -54,8 +54,18 @@ export function CleanupSection() {
   const t = useT();
   const [downloads, setDownloads] = useState<DownloadEntry[]>([]);
 
+  // Re-read when the panel comes back into view, so downloads finished since
+  // it mounted show up.
   useEffect(() => {
-    void listDownloads().then(({ items }) => setDownloads(items));
+    const refresh = () => void listDownloads().then(({ items }) => setDownloads(items), () => undefined);
+    const onVisible = () => document.visibilityState === "visible" && refresh();
+    refresh();
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, []);
 
   const clear = () =>

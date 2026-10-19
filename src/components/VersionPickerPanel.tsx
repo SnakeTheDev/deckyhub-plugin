@@ -1,9 +1,9 @@
 import { DialogButtonPrimary as Button, DropdownItem, Focusable, Navigation } from "@decky/ui";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { FaExternalLinkAlt, FaSync } from "react-icons/fa";
 import type { TFunc } from "../i18n/en";
 import type { UpdateChannel } from "../types";
-import { modalButtonStyle, windowGap } from "../utils";
+import { inChannel, modalButtonStyle, windowGap } from "../utils";
 import { keepInView } from "./KeepInView";
 
 // Shared by both version pickers: the channel's releases and the selected one.
@@ -14,11 +14,16 @@ export function useReleasePicker<T extends { tag: string; prerelease: boolean }>
   const [selectedTag, setSelectedTag] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Bumped per load() so a slower load for a channel switched away from can't
+  // overwrite the newer one.
+  const loadRun = useRef(0);
 
   const load = async (pinLatest = false) => {
+    const run = ++loadRun.current;
     setLoading(true);
     const result = await fetchReleases(pinLatest);
-    const filtered = result.items.filter((item) => item.prerelease === (channel === "prerelease"));
+    if (run !== loadRun.current) return;
+    const filtered = result.items.filter((item) => inChannel(item, channel));
     setItems(filtered);
     setError(result.error ?? null);
     setSelectedTag((current) => (!pinLatest && filtered.some((item) => item.tag === current) ? current : filtered[0]?.tag ?? ""));
@@ -27,7 +32,6 @@ export function useReleasePicker<T extends { tag: string; prerelease: boolean }>
 
   useEffect(() => {
     void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [channel]);
 
   return { items, selectedTag, setSelectedTag, loading, error, setError, load, selected: items.find((item) => item.tag === selectedTag) ?? null };

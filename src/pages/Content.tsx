@@ -320,7 +320,7 @@ export function Content({ fullPage }: { fullPage?: View }) {
       <KeepInView>
         <PanelSection title={t("settings.troubleshooting")}>
           <PanelSectionRow>
-            <Button style={compactButtonStyle} onClick={() => void exportLogs().then(({ path }) => toaster.toast({ title: "DeckyHub", body: t("repos.exportedTo", { path }) }))}>
+            <Button style={compactButtonStyle} onClick={() => void exportLogs().then(({ path }) => toaster.toast({ title: "DeckyHub", body: t("repos.exportedTo", { path }) }), (error) => toaster.toast({ title: "DeckyHub", body: String(error) }))}>
               <FaFileExport /> {t("settings.exportLogs")}
             </Button>
           </PanelSectionRow>

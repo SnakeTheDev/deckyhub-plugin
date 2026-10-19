@@ -135,6 +135,7 @@ export const zh: Record<MessageKey, string> = {
   "toast.installStalledBody": "请重新加载 Decky 后重试。",
   "dl.failedTitle": "DeckyHub 下载失败",
   "dl.failedNoReason": "下载失败，未报告原因。",
+  "dl.missing": "此下载已不再跟踪。请查看下载中的 deckyhub 文件夹。",
   "dl.progress": "{percent}% · {received} / {total}",
   "repos.addedToast": "已将 {repo} 添加到发现。",
   "repos.alreadyAdded": "{repo} 已在 DeckyHub 中。",

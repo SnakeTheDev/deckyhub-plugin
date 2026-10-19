@@ -91,7 +91,7 @@ Shows every tracked tool that's installed and has a newer release available, alo
 
 Tap **Manage** on any card in Discover or Updates to:
 
-- pick the release **channel** (stable or pre-release) and a specific **version**;
+- pick the release **channel** and a specific **version**. **Stable** shows only stable releases; **Pre-release** shows every release, newest first, so a stable release that comes out after the last pre-release is still offered;
 - **Download ZIP**, open the **Release Page**, or **Check for Updates** for that app;
 - for a Decky plugin, **Install** (not installed yet) or **Update** (the selected version is newer than the installed one). This hands the release ZIP to Decky Loader's own installer, the same one the Decky Store uses. Decky asks you to confirm and installs it, verifying the SHA-256 checksum GitHub publishes for the ZIP. Older releases (files uploaded before mid-2025) have no checksum and Decky installs them without that check;
 - for an installed Decky plugin, **Uninstall**, which asks you to confirm and then removes the plugin and its settings through Decky Loader.
@@ -110,7 +110,7 @@ To switch a tracked app between stable and pre-release releases, use its [Manage
 
 ### Keeping DeckyHub itself updated
 
-Settings includes a **Check Update** option that looks for new stable releases (or pre-releases, if you opt in) of DeckyHub itself. A newer release triggers a notification; if you're already on the latest, it says no update is available. When an update is available, you get two ways to install it:
+Settings includes a **Check Update** option that looks for new stable releases of DeckyHub itself (or every release, pre-releases included, if you opt in). A newer release triggers a notification; if you're already on the latest, it says no update is available. When an update is available, you get two ways to install it:
 
 - **Update Automatically** — hands the release off to Decky Loader's own installer (the same one the Decky Store uses), which downloads, verifies, and installs it in place. No manual ZIP step needed.
 - **Download ZIP** — the classic path: saves the update ZIP to `/home/deck/Downloads/deckyhub`, which you then install yourself via Decky → Developer → Install Plugin from ZIP.
