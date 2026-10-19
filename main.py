@@ -21,6 +21,7 @@ if PLUGIN_DIR not in sys.path:
     sys.path.insert(0, PLUGIN_DIR)
 
 from backend.registry import MAX_CUSTOM_REGISTRIES, REMOTE_REGISTRY_URL, fetch_remote_registry, load_registry, parse_registry, validate_registry_url
+from backend.tls import verifying_ssl_context
 
 DEFAULT_DOWNLOAD_DIR = "/home/deck/Downloads"
 PLUGIN_DOWNLOAD_DIR = f"{DEFAULT_DOWNLOAD_DIR}/deckyhub"
@@ -556,7 +557,7 @@ class Plugin:
     def _download_with_urllib(self, job_id: str, asset: dict, temp: Path):
         job = self.downloads[job_id]
         request = Request(asset["url"], headers={"User-Agent": "DeckyHub/0.2"})
-        with urlopen(request, timeout=30) as response, open(temp, "wb") as file:
+        with urlopen(request, timeout=30, context=verifying_ssl_context()) as response, open(temp, "wb") as file:
             job["total"] = int(response.headers.get("Content-Length") or job["total"] or 0)
             while chunk := response.read(64 * 1024):
                 if job_id in self.cancelled:

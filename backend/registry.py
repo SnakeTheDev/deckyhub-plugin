@@ -3,6 +3,8 @@ from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 from pathlib import Path
 
+from backend.tls import verifying_ssl_context
+
 
 def parse_registry(payload: object) -> list[dict]:
     """Validate the portable registry format and ignore malformed records."""
@@ -31,7 +33,7 @@ def fetch_remote_registry(url: str = REMOTE_REGISTRY_URL, timeout: float = REMOT
     if not url.startswith("https://"):
         raise ValueError("Registry URL must use HTTPS")
     request = Request(url, headers={"User-Agent": "DeckyHub"})
-    with urlopen(request, timeout=timeout) as response:
+    with urlopen(request, timeout=timeout, context=verifying_ssl_context()) as response:
         raw = response.read(MAX_REMOTE_REGISTRY_BYTES + 1)
     if len(raw) > MAX_REMOTE_REGISTRY_BYTES:
         raise ValueError("Remote registry is too large")
