@@ -66,6 +66,16 @@ def fake_fetch(responses: dict):
 
 
 class CustomRegistryTests(unittest.TestCase):
+    @staticmethod
+    def _verified(message):
+        """A verification error, with or without the OpenSSL verify_message set."""
+        import ssl
+
+        error = ssl.SSLCertVerificationError(message or "certificate verify failed")
+        if message is not None:
+            error.verify_message = message
+        return error
+
     def plugin(self, home: str, registries: list[str] | None = None) -> Plugin:
         sys.modules["decky"].DECKY_PLUGIN_SETTINGS_DIR = home
         sys.modules["decky"].DECKY_PLUGIN_DIR = str(ROOT)
@@ -162,7 +172,14 @@ class CustomRegistryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as home:
             plugin = self.plugin(home)
             # urlopen wraps the real cause in URLError.reason, so that path must unwrap.
-            cases = {URLError(ssl.SSLCertVerificationError("self signed certificate")): "certificate could not be verified", URLError(ssl.SSLError("wrong version number")): "TLS handshake failed"}
+            # verify_message is what makes the log actionable - "certificate has expired"
+            # means the system clock, "self signed" means a proxy or missing CA bundle.
+            cases = {
+                URLError(self._verified("certificate has expired")): "certificate has expired",
+                URLError(self._verified("self signed certificate")): "self signed certificate",
+                URLError(self._verified(None)): "certificate could not be verified",
+                URLError(ssl.SSLError("wrong version number")): "certificate could not be verified",
+            }
             for error, detail in cases.items():
                 with self.subTest(detail=detail):
                     with patch.object(main, "fetch_remote_registry", fake_fetch({CUSTOM_URL: error})):

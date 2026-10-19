@@ -74,7 +74,11 @@ def _registry_failure_reason(error: Exception) -> tuple[str, str]:
     # urlopen wraps the real cause in URLError.reason, so unwrap before looking for TLS.
     cause = getattr(error, "reason", None) or error
     if isinstance(cause, ssl.SSLError):
-        return ("ssl-error", "certificate could not be verified" if isinstance(cause, ssl.SSLCertVerificationError) else "TLS handshake failed")
+        # verify_message is what makes this actionable when OpenSSL sets it: "certificate
+        # has expired" points at the system clock, "self signed certificate" at a proxy or
+        # a missing CA bundle. It isn't present on every verification error, so fall back.
+        detail = getattr(cause, "verify_message", "") or "certificate could not be verified"
+        return ("ssl-error", detail)
     if isinstance(error, ValueError):
         return ("not-registry", str(error))
     return ("unreachable", str(error))
