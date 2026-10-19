@@ -28,6 +28,7 @@ REPOSITORY_NAME = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 HIDEABLE_BUTTONS = ("downloadZip", "install", "update", "releasePage")
 SUPPORTED_LANGUAGES = {"auto", "en", "uk", "es", "de", "fr", "ja", "zh"}
 DEFAULT_COLUMNS_PER_ROW = 3
+REGISTRY_RETRY_DELAY = 1.5
 
 
 def _coerce_columns_per_row(value) -> int:
@@ -428,7 +429,7 @@ class Plugin:
         # Load it once before saving, so a dead or non-registry URL is reported here,
         # while the user is watching, instead of being skipped on every later start.
         try:
-            apps, text = await asyncio.to_thread(fetch_remote_registry, url)
+            apps, text = await self._fetch_registry_for_user(url)
         except (OSError, ValueError) as error:
             reason, detail = _registry_failure_reason(error)
             decky.logger.error("Can't load registry %s: %s", url, error)
@@ -440,6 +441,23 @@ class Plugin:
         self.apps = await asyncio.to_thread(self._load_registry, {url: (apps, text)})
         decky.logger.info("Added registry %s with %d repositories", url, len(apps))
         return {"added": True, "url": url, "apps": len(apps)}
+
+    async def _fetch_registry_for_user(self, url: str) -> tuple[list[dict], str]:
+        """Download one registry for an explicit user action, retrying once.
+
+        Connection resets and TLS handshake failures are usually transient, and
+        this only runs when someone is watching and waiting on the result, so a
+        single retry is cheap insurance. A ValueError means the bytes arrived but
+        aren't a registry, so retrying that would only waste the wait.
+        """
+        for attempt in range(2):
+            try:
+                return await asyncio.to_thread(fetch_remote_registry, url)
+            except OSError:
+                if attempt:
+                    raise
+                decky.logger.info("Retrying registry %s after a network error", url)
+                await asyncio.sleep(REGISTRY_RETRY_DELAY)
 
     async def remove_custom_registry(self, url: str):
         wanted = url.strip() if isinstance(url, str) else ""

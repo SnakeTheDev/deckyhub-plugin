@@ -115,6 +115,46 @@ class CustomRegistryTests(unittest.TestCase):
             self.assertEqual([app["repo"] for app in plugin.apps], ["owner/official", "owner/custom"])
             self.assertEqual(plugin._load_settings()["customRegistries"], [CUSTOM_URL])
 
+    def test_add_retries_once_on_a_network_error(self):
+        with tempfile.TemporaryDirectory() as home, patch.object(main, "REGISTRY_RETRY_DELAY", 0):
+            plugin = self.plugin(home)
+            attempts = []
+
+            def flaky(url, *args, **kwargs):
+                if url == CUSTOM_URL:
+                    attempts.append(url)
+                    if len(attempts) == 1:
+                        raise URLError("TLS handshake failed")
+                return parse_registry(payload("owner/custom" if url == CUSTOM_URL else "owner/official")), json.dumps(payload("owner/custom" if url == CUSTOM_URL else "owner/official"))
+
+            with patch.object(main, "fetch_remote_registry", flaky):
+                result = asyncio.run(plugin.add_custom_registry(CUSTOM_URL))
+            self.assertTrue(result["added"])
+            self.assertEqual(len(attempts), 2)
+
+    def test_add_does_not_retry_a_malformed_registry(self):
+        # A ValueError means the bytes arrived and aren't a registry; retrying
+        # would just make the user wait twice as long for the same answer.
+        with tempfile.TemporaryDirectory() as home, patch.object(main, "REGISTRY_RETRY_DELAY", 0):
+            plugin = self.plugin(home)
+            attempts = []
+
+            def malformed(url, *args, **kwargs):
+                attempts.append(url)
+                raise ValueError("Unsupported registry format")
+
+            with patch.object(main, "fetch_remote_registry", malformed):
+                result = asyncio.run(plugin.add_custom_registry(CUSTOM_URL))
+            self.assertEqual(result["reason"], "not-registry")
+            self.assertEqual(len(attempts), 1)
+
+    def test_add_gives_up_after_two_failures(self):
+        with tempfile.TemporaryDirectory() as home, patch.object(main, "REGISTRY_RETRY_DELAY", 0):
+            plugin = self.plugin(home)
+            with patch.object(main, "fetch_remote_registry", fake_fetch({CUSTOM_URL: URLError("gone")})):
+                result = asyncio.run(plugin.add_custom_registry(CUSTOM_URL))
+            self.assertEqual((result["added"], result["reason"]), (False, "unreachable"))
+
     def test_add_maps_tls_failures_to_ssl_error(self):
         from urllib.error import URLError
         import ssl

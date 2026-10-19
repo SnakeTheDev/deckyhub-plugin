@@ -118,12 +118,13 @@ export function ManageRepositoriesPage() {
         return;
       }
       const key = REGISTRY_ERROR[result.reason ?? ""];
-      // `detail` carries whatever the backend attached — the limit for too-many,
-      // the HTTP/parse reason otherwise. Extra vars are simply unused per template.
-      toaster.toast({ title: "DeckyHub", body: key ? t(key, { url, limit: result.detail ?? "", error: result.detail ?? "" }) : t("repos.registryFailed", { error: result.detail ?? "" }) });
+      // Decky's toaster truncates a long body, so the toast stays a short sentence and
+      // the technical reason goes to the DeckyHub log instead (see log_frontend).
+      if (result.detail) log(`Registry add rejected (${result.reason}) for ${url}: ${result.detail}`);
+      toaster.toast({ title: "DeckyHub", body: key ? t(key, { limit: result.detail ?? "10" }) : t("repos.registryFailed") });
     } catch (error) {
       log(`Adding registry failed: ${error}`);
-      toaster.toast({ title: "DeckyHub", body: t("repos.registryFailed", { error: String(error) }) });
+      toaster.toast({ title: "DeckyHub", body: t("repos.registryFailed") });
     } finally {
       setRegistryBusy(false);
     }
@@ -155,7 +156,7 @@ export function ManageRepositoriesPage() {
       window.dispatchEvent(new Event(REGISTRY_UPDATED));
     } catch (error) {
       log(`Refreshing registries failed: ${error}`);
-      toaster.toast({ title: "DeckyHub", body: t("repos.registryFailed", { error: String(error) }) });
+      toaster.toast({ title: "DeckyHub", body: t("repos.registryFailed") });
     } finally {
       setRegistryBusy(false);
     }
