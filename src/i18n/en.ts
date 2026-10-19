@@ -154,6 +154,12 @@ export const en = {
   "repos.registryAdded": "Registry added with {apps} repositories.",
   "repos.registryAlreadyAdded": "That registry is already in use.",
   "repos.registryFailed": "Couldn't use that registry: {error}",
+  "repos.errInvalidUrl": "That isn't a usable registry URL — it must be an https:// link ending in .json.",
+  "repos.errOfficial": "That's DeckyHub's own registry, which is always in use.",
+  "repos.errTooMany": "You've reached the limit of {limit} custom registries. Remove one to add another.",
+  "repos.errNotFound": "Nothing at that URL. Check the repository is public and has registry/apps.json on the main branch.",
+  "repos.errNotRegistry": "That JSON isn't a DeckyHub registry ({error}).",
+  "repos.errUnreachable": "Couldn't reach that URL ({error}).",
 
   "github.error": "GitHub API returned {status}",
   "release.noMatch": "No matching release found.",

@@ -155,6 +155,12 @@ export const es: Record<MessageKey, string> = {
   "repos.registryAdded": "Registro añadido con {apps} repositorios.",
   "repos.registryAlreadyAdded": "Ese registro ya está en uso.",
   "repos.registryFailed": "No se pudo usar ese registro: {error}",
+  "repos.errInvalidUrl": "Esa no es una URL de registro válida: debe ser un enlace https:// que termine en .json.",
+  "repos.errOfficial": "Ese es el registro propio de DeckyHub, que siempre está en uso.",
+  "repos.errTooMany": "Has alcanzado el límite de {limit} registros personalizados. Quita uno para añadir otro.",
+  "repos.errNotFound": "No hay nada en esa URL. Comprueba que el repositorio sea público y tenga registry/apps.json en la rama main.",
+  "repos.errNotRegistry": "Ese JSON no es un registro de DeckyHub ({error}).",
+  "repos.errUnreachable": "No se pudo acceder a esa URL ({error}).",
 
   "github.error": "La API de GitHub devolvió {status}",
   "release.noMatch": "No se encontró ninguna versión compatible.",

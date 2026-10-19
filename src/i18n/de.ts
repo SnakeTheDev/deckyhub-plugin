@@ -155,6 +155,12 @@ export const de: Record<MessageKey, string> = {
   "repos.registryAdded": "Registry mit {apps} Repositories hinzugefügt.",
   "repos.registryAlreadyAdded": "Diese Registry wird bereits verwendet.",
   "repos.registryFailed": "Diese Registry konnte nicht verwendet werden: {error}",
+  "repos.errInvalidUrl": "Das ist keine nutzbare Registry-URL – es muss ein https://-Link sein, der auf .json endet.",
+  "repos.errOfficial": "Das ist DeckyHubs eigene Registry, die immer verwendet wird.",
+  "repos.errTooMany": "Du hast das Limit von {limit} eigenen Registries erreicht. Entferne eine, um eine neue hinzuzufügen.",
+  "repos.errNotFound": "Unter dieser URL liegt nichts. Prüfe, ob das Repository öffentlich ist und registry/apps.json im Branch main enthält.",
+  "repos.errNotRegistry": "Diese JSON-Datei ist keine DeckyHub-Registry ({error}).",
+  "repos.errUnreachable": "Diese URL war nicht erreichbar ({error}).",
 
   "github.error": "GitHub-API hat {status} zurückgegeben",
   "release.noMatch": "Keine passende Version gefunden.",

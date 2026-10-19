@@ -155,6 +155,12 @@ export const zh: Record<MessageKey, string> = {
   "repos.registryAdded": "已添加包含 {apps} 个仓库的注册表。",
   "repos.registryAlreadyAdded": "该注册表已在使用中。",
   "repos.registryFailed": "无法使用该注册表：{error}",
+  "repos.errInvalidUrl": "这不是可用的注册表网址——必须是以 .json 结尾的 https:// 链接。",
+  "repos.errOfficial": "那是 DeckyHub 自带的注册表，始终在使用中。",
+  "repos.errTooMany": "已达到 {limit} 个自定义注册表的上限。请先移除一个再添加。",
+  "repos.errNotFound": "该网址下没有内容。请确认仓库是公开的，且在 main 分支中有 registry/apps.json。",
+  "repos.errNotRegistry": "该 JSON 不是 DeckyHub 注册表（{error}）。",
+  "repos.errUnreachable": "无法访问该网址（{error}）。",
 
   "github.error": "GitHub API 返回了 {status}",
   "release.noMatch": "未找到匹配的版本。",

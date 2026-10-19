@@ -155,6 +155,12 @@ export const uk: Record<MessageKey, string> = {
   "repos.registryAdded": "Реєстр додано з {apps} репозиторіями.",
   "repos.registryAlreadyAdded": "Цей реєстр уже використовується.",
   "repos.registryFailed": "Не вдалося використати цей реєстр: {error}",
+  "repos.errInvalidUrl": "Це не придатне URL реєстру — має бути посилання https://, що закінчується на .json.",
+  "repos.errOfficial": "Це власний реєстр DeckyHub, він завжди використовується.",
+  "repos.errTooMany": "Досягнуто ліміт у {limit} власних реєстрів. Видаліть один, щоб додати інший.",
+  "repos.errNotFound": "За цією URL нічого немає. Перевірте, чи репозиторій публічний і має registry/apps.json у гілці main.",
+  "repos.errNotRegistry": "Цей JSON не є реєстром DeckyHub ({error}).",
+  "repos.errUnreachable": "Не вдалося зв'язатися з цією URL ({error}).",
 
   "github.error": "GitHub API повернув {status}",
   "release.noMatch": "Відповідний реліз не знайдено.",

@@ -9,7 +9,7 @@ import time
 import re
 import zipfile
 from pathlib import Path
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 import decky
@@ -60,6 +60,18 @@ def _coerce_registry_urls(values) -> list[str]:
         if url not in urls:
             urls.append(url)
     return urls[:MAX_CUSTOM_REGISTRIES]
+
+
+# A user mistyping a registry URL is ordinary, not exceptional: add_custom_registry
+# reports these as a reason code for the UI to translate instead of raising, so a
+# Python exception never reaches the frontend. See CONTRIBUTING.md's error pattern
+# on download_asset, which returns {"error": ...} for the same reason.
+def _registry_failure_reason(error: Exception) -> tuple[str, str]:
+    if isinstance(error, HTTPError):
+        return ("not-found", f"HTTP {error.code}") if error.code == 404 else ("unreachable", f"HTTP {error.code}")
+    if isinstance(error, ValueError):
+        return ("not-registry", str(error))
+    return ("unreachable", str(error))
 
 
 def _coerce_settings(settings: dict) -> dict:
@@ -383,22 +395,26 @@ class Plugin:
         return {"registries": [{"url": url} for url in self.settings.get("customRegistries", [])]}
 
     async def add_custom_registry(self, url: str):
+        """Never raises for user input: returns added=False plus a reason code for the UI."""
         try:
             url = validate_registry_url(url)
         except ValueError as error:
             decky.logger.error("Refused to add invalid registry URL %r", url)
-            raise ValueError(str(error)) from error
-        if url == REMOTE_REGISTRY_URL or url in self.settings.get("customRegistries", []):
-            return {"added": False, "url": url}
+            return {"added": False, "url": url, "reason": "invalid-url", "detail": str(error)}
+        if url == REMOTE_REGISTRY_URL:
+            return {"added": False, "url": url, "reason": "official", "detail": ""}
+        if url in self.settings.get("customRegistries", []):
+            return {"added": False, "url": url, "reason": "already-added", "detail": ""}
         if len(self.settings.get("customRegistries", [])) >= MAX_CUSTOM_REGISTRIES:
-            raise ValueError(f"You can track at most {MAX_CUSTOM_REGISTRIES} custom registries")
-        # Load it once before saving, so a dead or non-registry URL fails here with
-        # a message the UI can show, instead of being silently skipped on every start.
+            return {"added": False, "url": url, "reason": "too-many", "detail": str(MAX_CUSTOM_REGISTRIES)}
+        # Load it once before saving, so a dead or non-registry URL is reported here,
+        # while the user is watching, instead of being skipped on every later start.
         try:
             apps, _ = await asyncio.to_thread(fetch_remote_registry, url)
         except (OSError, ValueError) as error:
+            reason, detail = _registry_failure_reason(error)
             decky.logger.error("Can't load registry %s: %s", url, error)
-            raise ValueError(f"Couldn't load that registry: {error}") from error
+            return {"added": False, "url": url, "reason": reason, "detail": detail}
         self.settings.setdefault("customRegistries", []).append(url)
         self._save_settings()
         self.apps = await asyncio.to_thread(self._load_registry)
@@ -406,9 +422,10 @@ class Plugin:
         return {"added": True, "url": url, "apps": len(apps)}
 
     async def remove_custom_registry(self, url: str):
-        stored = next((item for item in self.settings.get("customRegistries", []) if item == url.strip()), None)
+        wanted = url.strip() if isinstance(url, str) else ""
+        stored = next((item for item in self.settings.get("customRegistries", []) if item == wanted), None)
         if stored is None:
-            return {"removed": False, "url": url}
+            return {"removed": False, "url": wanted}
         self.settings["customRegistries"].remove(stored)
         self._save_settings()
         self.apps = await asyncio.to_thread(self._load_registry)

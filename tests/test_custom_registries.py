@@ -115,36 +115,60 @@ class CustomRegistryTests(unittest.TestCase):
             self.assertEqual([app["repo"] for app in plugin.apps], ["owner/official", "owner/custom"])
             self.assertEqual(plugin._load_settings()["customRegistries"], [CUSTOM_URL])
 
-    def test_add_refuses_a_url_that_does_not_load(self):
-        for error in (URLError("no route to host"), ValueError("Unsupported registry format")):
-            with self.subTest(error=type(error).__name__), tempfile.TemporaryDirectory() as home:
+    def test_add_reports_an_unloadable_url_without_raising(self):
+        # A mistyped URL is ordinary user error: it must never reach the frontend
+        # as a Python exception, or Decky wraps it as "PythonException: ...".
+        cases = {URLError("no route to host"): "unreachable", ValueError("Unsupported registry format"): "not-registry"}
+        for error, reason in cases.items():
+            with self.subTest(reason=reason), tempfile.TemporaryDirectory() as home:
                 plugin = self.plugin(home)
                 with patch.object(main, "fetch_remote_registry", fake_fetch({CUSTOM_URL: error})):
-                    with self.assertRaises(ValueError):
-                        asyncio.run(plugin.add_custom_registry(CUSTOM_URL))
+                    result = asyncio.run(plugin.add_custom_registry(CUSTOM_URL))
+                self.assertEqual((result["added"], result["reason"]), (False, reason))
                 self.assertEqual(plugin._load_settings()["customRegistries"], [])
 
-    def test_add_refuses_an_unusable_url_shape(self):
+    def test_add_maps_a_404_to_not_found(self):
+        from urllib.error import HTTPError
+
+        with tempfile.TemporaryDirectory() as home:
+            plugin = self.plugin(home)
+            missing = HTTPError(CUSTOM_URL, 404, "Not Found", {}, None)
+            with patch.object(main, "fetch_remote_registry", fake_fetch({CUSTOM_URL: missing})):
+                result = asyncio.run(plugin.add_custom_registry(CUSTOM_URL))
+            self.assertEqual((result["added"], result["reason"], result["detail"]), (False, "not-found", "HTTP 404"))
+
+    def test_add_maps_a_server_error_to_unreachable(self):
+        from urllib.error import HTTPError
+
+        with tempfile.TemporaryDirectory() as home:
+            plugin = self.plugin(home)
+            broken = HTTPError(CUSTOM_URL, 503, "Service Unavailable", {}, None)
+            with patch.object(main, "fetch_remote_registry", fake_fetch({CUSTOM_URL: broken})):
+                result = asyncio.run(plugin.add_custom_registry(CUSTOM_URL))
+            self.assertEqual((result["added"], result["reason"]), (False, "unreachable"))
+
+    def test_add_reports_an_unusable_url_shape_without_raising(self):
         with tempfile.TemporaryDirectory() as home:
             plugin = self.plugin(home)
             for url in ("http://example.com/apps.json", "https://example.com/apps.txt"):
-                with self.assertRaises(ValueError):
-                    asyncio.run(plugin.add_custom_registry(url))
+                result = asyncio.run(plugin.add_custom_registry(url))
+                self.assertEqual((result["added"], result["reason"]), (False, "invalid-url"))
+            self.assertEqual(plugin._load_settings()["customRegistries"], [])
 
     def test_add_ignores_a_repeat_and_the_official_url(self):
         with tempfile.TemporaryDirectory() as home:
             plugin = self.plugin(home, [CUSTOM_URL])
             with patch.object(main, "fetch_remote_registry", fake_fetch({REMOTE_REGISTRY_URL: payload()})):
-                self.assertFalse(asyncio.run(plugin.add_custom_registry(CUSTOM_URL))["added"])
-                self.assertFalse(asyncio.run(plugin.add_custom_registry(REMOTE_REGISTRY_URL))["added"])
+                self.assertEqual(asyncio.run(plugin.add_custom_registry(CUSTOM_URL))["reason"], "already-added")
+                official = asyncio.run(plugin.add_custom_registry(REMOTE_REGISTRY_URL))
+                self.assertEqual((official["added"], official["reason"]), (False, "official"))
             self.assertEqual(plugin._load_settings()["customRegistries"], [CUSTOM_URL])
 
     def test_add_stops_at_the_registr_cap(self):
         with tempfile.TemporaryDirectory() as home, patch.object(main, "MAX_CUSTOM_REGISTRIES", 1):
             plugin = self.plugin(home, [CUSTOM_URL])
-            with patch.object(main, "fetch_remote_registry", fake_fetch({REMOTE_REGISTRY_URL: payload(), OTHER_URL: payload("owner/other")})):
-                with self.assertRaises(ValueError):
-                    asyncio.run(plugin.add_custom_registry(OTHER_URL))
+            result = asyncio.run(plugin.add_custom_registry(OTHER_URL))
+            self.assertEqual((result["added"], result["reason"], result["detail"]), (False, "too-many", "1"))
             self.assertEqual(plugin._load_settings()["customRegistries"], [CUSTOM_URL])
 
     def test_remove_drops_the_url_and_reloads(self):

@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { FaArrowLeft, FaArrowRight, FaCheck, FaFileExport, FaFileImport, FaPlus, FaRedo, FaSearch, FaTimes, FaTrash } from "react-icons/fa";
 import { addCustomRegistry, addCustomRepo, exportCustomRepos, getApps, getCustomRegistries, getCustomRepos, importCustomRepos, REGISTRY_UPDATED, refreshRegistry, removeCustomRegistry, removeCustomRepo } from "../api";
 import { useT } from "../i18n";
+import type { MessageKey } from "../i18n/en";
 import type { ManagedRegistry, ManagedRepo, SearchRepo } from "../types";
 import { compactButtonStyle, githubFetch, githubResponseError, isRepositoryName, log, registryLabel, registryUrlForRepo, sectionDividerStyle } from "../utils";
 
@@ -14,6 +15,19 @@ const RESULTS_PER_PAGE = 5;
 // How the user points at a registry: a GitHub "owner/repo" (expanded to the raw
 // URL by registryUrlForRepo), or any full HTTPS URL to a registry .json file.
 type RegistrySource = "repo" | "url";
+
+// The backend reports why an add didn't work as a reason code rather than raising,
+// so a mistyped URL never surfaces a Python exception. Keys are literal so the
+// map stays in step with MessageKey.
+const REGISTRY_ERROR: Record<string, MessageKey> = {
+  "invalid-url": "repos.errInvalidUrl",
+  official: "repos.errOfficial",
+  "already-added": "repos.registryAlreadyAdded",
+  "too-many": "repos.errTooMany",
+  "not-found": "repos.errNotFound",
+  "not-registry": "repos.errNotRegistry",
+  unreachable: "repos.errUnreachable",
+};
 
 export function ManageRepositoriesPage() {
   const t = useT();
@@ -93,11 +107,19 @@ export function ManageRepositoriesPage() {
     }
     setRegistryBusy(true);
     try {
-      const result = await addCustomRegistry(registrySource === "repo" ? registryUrlForRepo(value) : value);
-      setRegistryValue("");
-      refreshRepos();
-      window.dispatchEvent(new Event(REGISTRY_UPDATED));
-      toaster.toast({ title: "DeckyHub", body: result.added ? t("repos.registryAdded", { apps: result.apps ?? 0 }) : t("repos.registryAlreadyAdded") });
+      const url = registrySource === "repo" ? registryUrlForRepo(value) : value;
+      const result = await addCustomRegistry(url);
+      if (result.added) {
+        setRegistryValue("");
+        refreshRepos();
+        window.dispatchEvent(new Event(REGISTRY_UPDATED));
+        toaster.toast({ title: "DeckyHub", body: t("repos.registryAdded", { apps: result.apps ?? 0 }) });
+        return;
+      }
+      const key = REGISTRY_ERROR[result.reason ?? ""];
+      // `detail` carries whatever the backend attached — the limit for too-many,
+      // the HTTP/parse reason otherwise. Extra vars are simply unused per template.
+      toaster.toast({ title: "DeckyHub", body: key ? t(key, { url, limit: result.detail ?? "", error: result.detail ?? "" }) : t("repos.registryFailed", { error: result.detail ?? "" }) });
     } catch (error) {
       log(`Adding registry failed: ${error}`);
       toaster.toast({ title: "DeckyHub", body: t("repos.registryFailed", { error: String(error) }) });

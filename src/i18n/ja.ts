@@ -155,6 +155,12 @@ export const ja: Record<MessageKey, string> = {
   "repos.registryAdded": "{apps} 件のリポジトリを含むレジストリを追加しました。",
   "repos.registryAlreadyAdded": "そのレジストリはすでに使用されています。",
   "repos.registryFailed": "そのレジストリを使用できませんでした: {error}",
+  "repos.errInvalidUrl": "使用できるレジストリ URL ではありません。https:// で始まり .json で終わるリンクを入力してください。",
+  "repos.errOfficial": "それは DeckyHub 自身のレジストリで、常に使用されています。",
+  "repos.errTooMany": "カスタムレジストリの上限 {limit} 件に達しました。削除してから追加してください。",
+  "repos.errNotFound": "その URL には何もありません。リポジトリが公開されているか、main ブランチに registry/apps.json があるか確認してください。",
+  "repos.errNotRegistry": "その JSON は DeckyHub のレジストリではありません ({error})。",
+  "repos.errUnreachable": "その URL に接続できませんでした ({error})。",
 
   "github.error": "GitHub API がエラー {status} を返しました",
   "release.noMatch": "該当するリリースが見つかりません。",
