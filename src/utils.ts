@@ -294,35 +294,35 @@ function traceDeckyInstall(pluginName: string) {
   if (!backend) return;
   const started = Date.now();
   const elapsed = () => `${((Date.now() - started) / 1000).toFixed(1)}s`;
-  let remoteTimer: ReturnType<typeof setTimeout> | null = null;
-  const onStart = (name: string) => log(`Decky install start ${name} at ${elapsed()}`);
+  // Decky can fail an install without ever sending finish (e.g. a remote_binary
+  // download error leaves it at 95%), so warn once its events go quiet.
+  // Remote binaries download with no progress events, so that stage gets longer.
+  let idleTimer = 0;
+  const armIdle = (stage?: string) => {
+    window.clearTimeout(idleTimer);
+    idleTimer = window.setTimeout(() => {
+      log(`Decky install ${pluginName}: no progress after ${elapsed()} — check journalctl -u plugin_loader`);
+      toaster.toast({ title: tr("toast.installStalledTitle", { name: pluginName }), body: tr("toast.installStalledBody") });
+      stop();
+    }, stage?.endsWith("download_remote") ? 120_000 : 45_000);
+  };
+  const onStart = (name: string) => {
+    log(`Decky install start ${name} at ${elapsed()}`);
+    if (name === pluginName) armIdle();
+  };
   const onInfo = (progress: number, stage: string) => {
     log(`Decky install ${pluginName} ${progress}% ${stage} at ${elapsed()}`);
-    // Decky Loader can stall at 95% ("download_remote"): if a remote_binary
-    // download or hash check fails it never emits plugin_download_finish, so the
-    // progress dialog would sit there forever. Arm a short timer the moment that
-    // stage arrives; a finish cancels it, and otherwise we surface an actionable
-    // message instead of an endless 95%.
-    if (stage === "download_remote" || stage.includes("download_remote")) {
-      if (remoteTimer) window.clearTimeout(remoteTimer);
-      remoteTimer = window.setTimeout(() => {
-        log(`Decky install ${pluginName}: no finish after download_remote at ${elapsed()} - reloading Decky should clear it`);
-        toaster.toast({ title: "DeckyHub", body: tr("install.stalled", { name: pluginName }) });
-        stop();
-      }, 60 * 1000);
-    }
+    armIdle(stage);
   };
   const stop = () => {
     window.clearTimeout(timer);
-    if (remoteTimer) window.clearTimeout(remoteTimer);
-    remoteTimer = null;
+    window.clearTimeout(idleTimer);
     backend.removeEventListener("loader/plugin_download_start", onStart);
     backend.removeEventListener("loader/plugin_download_info", onInfo);
     backend.removeEventListener("loader/plugin_download_finish", onFinish);
   };
   const onFinish = (name: string) => {
     log(`Decky install finish ${name} at ${elapsed()}`);
-    if (remoteTimer) { window.clearTimeout(remoteTimer); remoteTimer = null; }
     if (name === pluginName) stop();
   };
   // Backstop: Decky never sends finish after a silent failure.
