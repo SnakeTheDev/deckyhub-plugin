@@ -35,5 +35,6 @@ npm run test:e2e
 - `Navigation.NavigateToExternalWeb()` opens a new browser tab instead of Steam's overlay browser.
 - Outside the Playwright suite, GitHub isn't stubbed: browsing the mock spends your own IP's 60 requests/hour. Settings shows what's left; add a token there if you iterate a lot.
 - Toasts, modals, and tabs are simplified divs/buttons, not Steam's real components.
+- The backend bridge only runs calls whose `Origin` is the mock frontend (`http://localhost:5183` or `http://127.0.0.1:5183`), so other sites open in your browser can't drive it.
 - The backend bridge stores its settings/registry cache under `.dev-data/` (gitignored) instead of `~/.config/decky-loader/...`, and fakes `decky.DECKY_HOME` for the "installed plugin" scan — so nothing here will ever show as "installed" unless you create fake `plugin.json` files under `.dev-data/plugins/<name>/`. Backend log lines (including errors the frontend forwards) print to the bridge's console and go to `.dev-data/logs/deckyhub.log`, which **Export Logs** zips into `.dev-data/home/Downloads/`.
 - This whole `devtools/` folder is standalone tooling with its own `package.json` — it's not part of the plugin build and isn't shipped in releases.

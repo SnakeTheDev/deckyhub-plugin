@@ -4,29 +4,34 @@ import json
 import os
 import shutil
 import subprocess
-import sys
 import time
 import re
 import zipfile
 from pathlib import Path
 from urllib.error import URLError
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 import decky
 
-# Decky loads main.py with importlib; its plugin directory is not guaranteed to be on sys.path.
 PLUGIN_DIR = str(Path(__file__).resolve().parent)
-if PLUGIN_DIR not in sys.path:
-    sys.path.insert(0, PLUGIN_DIR)
-
-from backend.registry import load_registry
-
 DEFAULT_DOWNLOAD_DIR = "/home/deck/Downloads"
 PLUGIN_DOWNLOAD_DIR = f"{DEFAULT_DOWNLOAD_DIR}/deckyhub"
 REPOSITORY_NAME = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 HIDEABLE_BUTTONS = ("downloadZip", "install", "update", "releasePage")
-SUPPORTED_LANGUAGES = {"auto", "en", "uk", "es", "de", "fr", "ja", "zh"}
+SUPPORTED_LANGUAGES = {"auto", "en", "uk", "ru", "es", "de", "fr", "ja", "zh"}
 DEFAULT_COLUMNS_PER_ROW = 3
+ACTIVE_DOWNLOAD_STATES = ("queued", "downloading")
+
+
+# GitHub's release URLs redirect to its asset CDN; never follow one off HTTPS.
+class _HttpsOnlyRedirects(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not newurl.startswith("https://"):
+            raise RuntimeError(f"Refused a redirect to a non-HTTPS URL: {newurl}")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+_OPENER = build_opener(_HttpsOnlyRedirects)
 
 
 def _coerce_columns_per_row(value) -> int:
@@ -58,11 +63,28 @@ def _coerce_settings(settings: dict) -> dict:
     }
 
 
+def _coerce_repo_settings(values) -> dict:
+    values = values if isinstance(values, dict) else {}
+    asset_filter = values.get("assetFilter")
+    return {
+        "channel": "prerelease" if values.get("channel") == "prerelease" else "stable",
+        "assetFilter": [value for value in asset_filter if isinstance(value, str) and value.strip()][:10] if isinstance(asset_filter, list) else [],
+    }
+
+
+def parse_registry(payload: object) -> list[dict]:
+    """Validate the portable registry format and ignore malformed records."""
+    if not isinstance(payload, dict) or payload.get("schemaVersion") != 1 or not isinstance(payload.get("apps"), list):
+        raise ValueError("Unsupported registry format")
+    required = {"id", "name", "repo", "category", "asset"}
+    return [app for app in payload["apps"] if required <= app.keys() and "/" in app["repo"]]
+
+
 class Plugin:
     async def _main(self):
         self.settings_path = Path(decky.DECKY_PLUGIN_SETTINGS_DIR) / "settings.json"
         self.settings = self._load_settings()
-        self.apps = load_registry(decky.DECKY_PLUGIN_DIR)
+        self.apps = parse_registry(json.loads((Path(decky.DECKY_PLUGIN_DIR) / "registry" / "apps.json").read_text(encoding="utf-8")))
         self.downloads: dict[str, dict] = {}
         self.cancelled: set[str] = set()
         self.download_queue: asyncio.Queue = asyncio.Queue()
@@ -72,11 +94,12 @@ class Plugin:
     def _load_settings(self) -> dict:
         try:
             settings = json.loads(self.settings_path.read_text(encoding="utf-8"))
-            repos = settings.get("customRepos", [])
+            repos = settings.get("customRepos")
+            repo_settings = settings.get("repoSettings")
             return {
                 **_coerce_settings(settings),
-                "customRepos": [repo for repo in repos if isinstance(repo, str) and REPOSITORY_NAME.fullmatch(repo)],
-                "repoSettings": settings.get("repoSettings", {}) if isinstance(settings.get("repoSettings"), dict) else {},
+                "customRepos": [repo for repo in repos if isinstance(repo, str) and REPOSITORY_NAME.fullmatch(repo)] if isinstance(repos, list) else [],
+                "repoSettings": {repo: _coerce_repo_settings(values) for repo, values in repo_settings.items() if REPOSITORY_NAME.fullmatch(repo)} if isinstance(repo_settings, dict) else {},
             }
         except (AttributeError, OSError, json.JSONDecodeError) as error:
             if self.settings_path.exists():
@@ -84,10 +107,17 @@ class Plugin:
             return {**_coerce_settings({}), "customRepos": [], "repoSettings": {}}
 
     def _save_settings(self):
+        # Write-then-rename, so a Deck losing power mid-save keeps the old file.
         self.settings_path.parent.mkdir(parents=True, exist_ok=True)
-        self.settings_path.write_text(json.dumps(self.settings), encoding="utf-8")
+        temp = self.settings_path.with_name(self.settings_path.name + ".tmp")
+        with open(temp, "w", encoding="utf-8") as file:
+            json.dump(self.settings, file)
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(temp, self.settings_path)
 
-    def _scan_installed_plugins(self) -> list[tuple[Path, dict, str | None]]:
+    # Each plugin's (plugin.json, package.json or {}, repository), read once per scan.
+    def _scan_installed_plugins(self) -> list[tuple[dict, dict, str | None]]:
         plugins_dir = Path(decky.DECKY_HOME) / "plugins"
         scanned = []
         for manifest_path in plugins_dir.glob("*/plugin.json"):
@@ -95,7 +125,11 @@ class Plugin:
                 manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 continue
-            scanned.append((manifest_path, manifest, self._plugin_repository(manifest_path, manifest)))
+            try:
+                package = json.loads((manifest_path.parent / "package.json").read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                package = {}
+            scanned.append((manifest, package, self._plugin_repository(manifest, package)))
         return scanned
 
     def _installed_version(self, app: dict) -> str | None:
@@ -111,31 +145,21 @@ class Plugin:
             decky.logger.warning("Version check %s failed: %s", command, error)
             return "installed"
 
-    def _match_decky_plugin(self, rule: dict, installed_plugins: list[tuple[Path, dict, str | None]]) -> tuple[Path, dict] | None:
+    def _match_decky_plugin(self, rule: dict, installed_plugins: list[tuple[dict, dict, str | None]]) -> tuple[dict, dict] | None:
         names = {name.casefold() for name in rule.get("names", [])}
         expected_repo = str(rule.get("repo", "")).casefold()
-        for manifest_path, manifest, repo in installed_plugins:
+        for manifest, package, repo in installed_plugins:
             if manifest.get("name", "").casefold() in names or (expected_repo and repo == expected_repo):
-                return manifest_path, manifest
+                return manifest, package
         return None
 
-    def _decky_plugin_version(self, match: tuple[Path, dict] | None) -> str | None:
+    def _decky_plugin_version(self, match: tuple[dict, dict] | None) -> str | None:
         if not match:
             return None
-        manifest_path, manifest = match
-        if manifest.get("version"):
-            return str(manifest["version"])
-        try:
-            package = json.loads((manifest_path.parent / "package.json").read_text(encoding="utf-8"))
-            return str(package.get("version") or "installed")
-        except (OSError, json.JSONDecodeError):
-            return "installed"
+        manifest, package = match
+        return str(manifest.get("version") or package.get("version") or "installed")
 
-    def _plugin_repository(self, manifest_path: Path, manifest: dict) -> str | None:
-        try:
-            package = json.loads((manifest_path.parent / "package.json").read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            package = {}
+    def _plugin_repository(self, manifest: dict, package: dict) -> str | None:
         value = package.get("repository", manifest.get("repository"))
         if isinstance(value, dict):
             value = value.get("url")
@@ -157,7 +181,7 @@ class Plugin:
             if app.get("detect", {}).get("type") == "decky-plugin":
                 match = self._match_decky_plugin(app["detect"], installed_plugins)
                 installed[index] = self._decky_plugin_version(match)
-                plugin_names[index] = match[1].get("name") if match else None
+                plugin_names[index] = match[0].get("name") if match else None
             else:
                 command_checks.append((index, app))
         command_versions = await asyncio.gather(*(asyncio.to_thread(self._installed_version, app) for _, app in command_checks))
@@ -170,10 +194,7 @@ class Plugin:
         if not REPOSITORY_NAME.fullmatch(repo):
             decky.logger.error("Refused settings for invalid repository %r", repo)
             raise ValueError("Repository must be owner/name")
-        item = {
-            "channel": "prerelease" if values.get("channel") == "prerelease" else "stable",
-            "assetFilter": [value for value in values.get("assetFilter", []) if isinstance(value, str) and value.strip()][:10],
-        }
+        item = _coerce_repo_settings(values)
         self.settings["repoSettings"][repo] = item
         self._save_settings()
         decky.logger.info("Saved settings for %s: %s", repo, item)
@@ -181,19 +202,16 @@ class Plugin:
 
     def _custom_apps(self) -> list[dict]:
         bundled = {app["repo"].casefold() for app in self.apps}
-        return [{"id": f"custom-{repo.replace('/', '-')}", "name": repo, "repo": repo, "category": "Custom", "versionStrategy": "semver", "source": "releases", "detect": {"type": "decky-plugin", "repo": repo}, "asset": {"include": [], "exclude": ["source"]}} for repo in self.settings["customRepos"] if repo.casefold() not in bundled]
+        return [{"id": f"custom-{repo.replace('/', '-')}", "name": repo, "repo": repo, "category": "Custom", "detect": {"type": "decky-plugin", "repo": repo}, "asset": {"include": [], "exclude": ["source"]}} for repo in self.settings["customRepos"] if repo.casefold() not in bundled]
 
     async def get_settings(self):
         return self.settings
 
     async def get_deckyhub_info(self):
-        for directory in (Path(getattr(decky, "DECKY_PLUGIN_DIR", PLUGIN_DIR)), Path(PLUGIN_DIR)):
-            try:
-                package = json.loads((directory / "package.json").read_text(encoding="utf-8"))
-                return {"version": str(package["version"])}
-            except (KeyError, OSError, json.JSONDecodeError):
-                pass
-        return {"version": "unknown"}
+        try:
+            return {"version": str(json.loads((Path(PLUGIN_DIR) / "package.json").read_text(encoding="utf-8"))["version"])}
+        except (KeyError, OSError, json.JSONDecodeError):
+            return {"version": "unknown"}
 
     async def save_settings(self, settings: dict):
         self.settings = {
@@ -207,12 +225,16 @@ class Plugin:
 
     async def clear_downloads(self):
         directory = Path(PLUGIN_DOWNLOAD_DIR)
+        # Files an active download is writing or about to write stay put.
+        active = {Path(path) for job in getattr(self, "downloads", {}).values() if job["state"] in ACTIVE_DOWNLOAD_STATES and job.get("path") for path in (job["path"], job["path"] + ".part")}
 
         def clear():
             if not directory.is_dir():
                 return 0
             removed = 0
             for entry in directory.iterdir():
+                if entry in active:
+                    continue
                 if entry.is_dir() and not entry.is_symlink():
                     shutil.rmtree(entry)
                 else:
@@ -248,7 +270,7 @@ class Plugin:
         return {"added": True, "repo": repo}
 
     async def get_custom_repos(self):
-        return {"repos": [{"repo": repo} for repo in self.settings["customRepos"]]}
+        return {"repos": self.settings["customRepos"]}
 
     async def remove_custom_repo(self, repo: str):
         repo = repo.strip()
@@ -262,12 +284,13 @@ class Plugin:
         decky.logger.info("Removed repository %s", stored)
         return {"removed": True, "repo": repo}
 
+    def _export_target(self, name: str) -> Path:
+        target = Path(DEFAULT_DOWNLOAD_DIR) / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        return self._next_name(target) if target.exists() else target
+
     async def export_custom_repos(self):
-        target_dir = Path(DEFAULT_DOWNLOAD_DIR)
-        target_dir.mkdir(parents=True, exist_ok=True)
-        target = target_dir / "DeckyHub-repositories.json"
-        if target.exists():
-            target = self._next_name(target)
+        target = self._export_target("DeckyHub-repositories.json")
         target.write_text(json.dumps({"schemaVersion": 1, "repos": self.settings["customRepos"]}, indent=2), encoding="utf-8")
         decky.logger.info("Exported %d repositories to %s", len(self.settings["customRepos"]), target)
         return {"path": str(target)}
@@ -278,11 +301,7 @@ class Plugin:
         decky.logger.warning("[frontend] %s", str(message)[:2000])
 
     async def export_logs(self):
-        target_dir = Path(DEFAULT_DOWNLOAD_DIR)
-        target_dir.mkdir(parents=True, exist_ok=True)
-        target = target_dir / "DeckyHub-logs.zip"
-        if target.exists():
-            target = self._next_name(target)
+        target = self._export_target(f"DeckyHub-logs-{time.strftime('%Y%m%d-%H%M%S')}.zip")
         with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:
             for log in sorted(Path(decky.DECKY_PLUGIN_LOG_DIR).glob("*.log")):
                 archive.write(log, log.name)
@@ -319,7 +338,7 @@ class Plugin:
         try:
             name = self._validate_download_asset(asset, repo)
             for job_id, job in self.downloads.items():
-                if job.get("repo") == repo and job.get("url") == asset["url"] and job["state"] in ("queued", "downloading"):
+                if job.get("repo") == repo and job.get("url") == asset["url"] and job["state"] in ACTIVE_DOWNLOAD_STATES:
                     return {"jobId": job_id}
             target_dir = Path(PLUGIN_DOWNLOAD_DIR)
             target_dir.mkdir(parents=True, exist_ok=True)
@@ -328,7 +347,7 @@ class Plugin:
                 target = self._next_name(target)
             # Finished jobs are only read by their own progress window, which stops
             # polling once it has seen the final state, so drop them here.
-            self.downloads = {key: job for key, job in self.downloads.items() if job["state"] in ("queued", "downloading")}
+            self.downloads = {key: job for key, job in self.downloads.items() if job["state"] in ACTIVE_DOWNLOAD_STATES}
             job_id = f"{name}-{time.monotonic_ns()}"
             self.downloads[job_id] = {"state": "queued", "filename": target.name, "received": 0, "total": asset.get("size") or 0, "path": str(target), "error": None, "repo": repo, "url": asset["url"]}
             self.download_queue.put_nowait((job_id, asset, target))
@@ -367,6 +386,8 @@ class Plugin:
     def _download(self, job_id: str, asset: dict, target: Path):
         job, temp = self.downloads[job_id], target.with_name(target.name + ".part")
         try:
+            if job_id in self.cancelled:
+                raise InterruptedError("Download cancelled")
             job["state"] = "downloading"
             try:
                 self._download_with_urllib(job_id, asset, temp)
@@ -392,7 +413,7 @@ class Plugin:
     def _download_with_urllib(self, job_id: str, asset: dict, temp: Path):
         job = self.downloads[job_id]
         request = Request(asset["url"], headers={"User-Agent": "DeckyHub/0.2"})
-        with urlopen(request, timeout=30) as response, open(temp, "wb") as file:
+        with _OPENER.open(request, timeout=30) as response, open(temp, "wb") as file:
             job["total"] = int(response.headers.get("Content-Length") or job["total"] or 0)
             while chunk := response.read(64 * 1024):
                 if job_id in self.cancelled:
@@ -408,10 +429,15 @@ class Plugin:
         environment = os.environ.copy()
         environment.pop("LD_LIBRARY_PATH", None)
         environment.pop("LD_PRELOAD", None)
-        process = subprocess.Popen([curl, "--fail", "--location", "--silent", "--show-error", "--connect-timeout", "15", "--max-time", "300", "--output", str(temp), asset["url"]], stderr=subprocess.PIPE, text=True, env=environment)
+        process = subprocess.Popen([curl, "--fail", "--location", "--proto", "=https", "--proto-redir", "=https", "--silent", "--show-error", "--connect-timeout", "15", "--max-time", "300", "--output", str(temp), asset["url"]], stderr=subprocess.PIPE, text=True, env=environment)
         while process.poll() is None:
             if job_id in self.cancelled:
                 process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
                 raise InterruptedError("Download cancelled")
             job["received"] = temp.stat().st_size if temp.exists() else 0
             time.sleep(0.2)
@@ -420,15 +446,15 @@ class Plugin:
         job["received"] = temp.stat().st_size
 
     def _sha256(self, path: Path) -> str:
-        digest = hashlib.sha256()
         with open(path, "rb") as file:
-            for chunk in iter(lambda: file.read(1024 * 1024), b""):
-                digest.update(chunk)
-        return digest.hexdigest()
+            return hashlib.file_digest(file, "sha256").hexdigest()
 
     async def get_download(self, job_id: str):
         return self.downloads.get(job_id, {"state": "missing"})
 
     async def cancel_download(self, job_id: str):
+        # Only active jobs: a finished job's id would otherwise stay in the set.
+        if self.downloads.get(job_id, {}).get("state") not in ACTIVE_DOWNLOAD_STATES:
+            return {"ok": False}
         self.cancelled.add(job_id)
         return {"ok": True}

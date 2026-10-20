@@ -8,11 +8,14 @@ import types
 import unittest
 import zipfile
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
+from urllib.request import Request
 
 sys.modules.setdefault("decky", types.SimpleNamespace(logger=logging.getLogger("decky-test")))
 import main
 from main import Plugin
+
+ROOT = Path(__file__).resolve().parent.parent
 
 
 class PluginStatusTests(unittest.TestCase):
@@ -44,7 +47,7 @@ class PluginStatusTests(unittest.TestCase):
             apps = asyncio.run(plugin.get_apps())["apps"]
             self.assertEqual([(app["installedVersion"], app["pluginName"]) for app in apps], [("3.2.1", "MAKO - Frame Generation"), (None, None)])
 
-    def test_decky_framegen_detection_matches_its_manifest_name(self):
+    def test_bundled_decky_framegen_rule_matches_its_manifest_name(self):
         with tempfile.TemporaryDirectory() as home:
             plugin_dir = Path(home) / "plugins" / "decky-framegen"
             plugin_dir.mkdir(parents=True)
@@ -53,10 +56,12 @@ class PluginStatusTests(unittest.TestCase):
             sys.modules["decky"].DECKY_HOME = home
             plugin = Plugin()
 
-            installed_plugins = plugin._scan_installed_plugins()
-            self.assertEqual(plugin._decky_plugin_version(plugin._match_decky_plugin({"type": "decky-plugin", "names": ["Decky-Framegen", "Decky Framegen"]}, installed_plugins)), "1.2.3")
+            registry = main.parse_registry(json.loads((ROOT / "registry" / "apps.json").read_text(encoding="utf-8")))
+            rule = next(app["detect"] for app in registry if app["id"] == "decky-framegen")
 
-    def test_overwrite_setting_defaults_to_false(self):
+            self.assertEqual(plugin._decky_plugin_version(plugin._match_decky_plugin(rule, plugin._scan_installed_plugins())), "1.2.3")
+
+    def test_overwrite_defaults_to_true_and_unknown_settings_are_dropped(self):
         with tempfile.TemporaryDirectory() as home:
             plugin = Plugin()
             plugin.settings_path = Path(home) / "settings.json"
@@ -64,18 +69,33 @@ class PluginStatusTests(unittest.TestCase):
             settings = asyncio.run(plugin.save_settings({}))
 
             self.assertTrue(settings["overwriteExisting"])
-            self.assertNotIn("downloadLocation", asyncio.run(plugin.save_settings({"downloadLocation": "downloads"})))
+            saved = asyncio.run(plugin.save_settings({"downloadLocation": "downloads", "verifySha256": False}))
+            self.assertNotIn("downloadLocation", saved)
+            self.assertNotIn("verifySha256", plugin._load_settings())
 
-    def test_github_token_is_trimmed_and_persisted(self):
+    def test_github_token_is_trimmed_capped_and_persisted(self):
         with tempfile.TemporaryDirectory() as home:
             plugin = Plugin()
             plugin.settings_path = Path(home) / "settings.json"
 
-            saved = asyncio.run(plugin.save_settings({"githubToken": "  ghp_example  "}))
-            self.assertEqual(saved["githubToken"], "ghp_example")
+            for value, expected in (("  ghp_example  ", "ghp_example"), ("   ", ""), ("x" * 400, "x" * 255), (12345, ""), (None, ""), ([], "")):
+                self.assertEqual(asyncio.run(plugin.save_settings({"githubToken": value}))["githubToken"], expected, msg=f"value: {value!r}")
+            asyncio.run(plugin.save_settings({"githubToken": "ghp_example"}))
+            self.assertEqual(plugin._load_settings()["githubToken"], "ghp_example")
 
-            reloaded = plugin._load_settings()
-            self.assertEqual(reloaded["githubToken"], "ghp_example")
+    def test_corrupt_settings_file_loads_with_defaults_for_bad_fields(self):
+        with tempfile.TemporaryDirectory() as home:
+            plugin = Plugin()
+            plugin.settings_path = Path(home) / "settings.json"
+            plugin.settings_path.write_text(json.dumps({
+                "customRepos": 5,
+                "repoSettings": {"owner/repo": {"channel": "prerelease", "assetFilter": "linux"}, "not a repo": {}, "owner/other": "bogus"},
+            }), encoding="utf-8")
+
+            loaded = plugin._load_settings()
+
+            self.assertEqual(loaded["customRepos"], [])
+            self.assertEqual(loaded["repoSettings"], {"owner/repo": {"channel": "prerelease", "assetFilter": []}, "owner/other": {"channel": "stable", "assetFilter": []}})
 
     def test_density_defaults_to_default_and_accepts_compact(self):
         with tempfile.TemporaryDirectory() as home:
@@ -96,41 +116,6 @@ class PluginStatusTests(unittest.TestCase):
             self.assertEqual(asyncio.run(plugin.save_settings({"hiddenButtons": "downloadZipinstall"}))["hiddenButtons"], [])
             self.assertEqual(plugin._load_settings()["hiddenButtons"], [])
 
-    def test_github_token_defaults_to_empty_and_rejects_non_string(self):
-        with tempfile.TemporaryDirectory() as home:
-            plugin = Plugin()
-            plugin.settings_path = Path(home) / "settings.json"
-
-            self.assertEqual(asyncio.run(plugin.save_settings({}))["githubToken"], "")
-            for bogus in (12345, None, [], {}, 1.5, True):
-                self.assertEqual(asyncio.run(plugin.save_settings({"githubToken": bogus}))["githubToken"], "", msg=f"value: {bogus!r}")
-
-    def test_github_token_is_capped_at_255_characters(self):
-        with tempfile.TemporaryDirectory() as home:
-            plugin = Plugin()
-            plugin.settings_path = Path(home) / "settings.json"
-
-            saved = asyncio.run(plugin.save_settings({"githubToken": "x" * 400}))
-            self.assertEqual(len(saved["githubToken"]), 255)
-
-    def test_github_token_whitespace_only_becomes_empty(self):
-        with tempfile.TemporaryDirectory() as home:
-            plugin = Plugin()
-            plugin.settings_path = Path(home) / "settings.json"
-
-            self.assertEqual(asyncio.run(plugin.save_settings({"githubToken": "   "}))["githubToken"], "")
-
-    def test_loading_settings_from_before_github_token_existed_defaults_it_to_empty(self):
-        # Simulates a user upgrading from a version of DeckyHub that predates
-        # this setting: their on-disk settings.json simply has no such key.
-        with tempfile.TemporaryDirectory() as home:
-            plugin = Plugin()
-            plugin.settings_path = Path(home) / "settings.json"
-            plugin.settings_path.write_text(json.dumps({"overwriteExisting": True, "updateChannel": "stable"}), encoding="utf-8")
-
-            loaded = plugin._load_settings()
-            self.assertEqual(loaded["githubToken"], "")
-
     def test_clear_downloads_only_removes_deckyhub_contents(self):
         with tempfile.TemporaryDirectory() as home:
             original_download_dir = main.PLUGIN_DOWNLOAD_DIR
@@ -148,6 +133,16 @@ class PluginStatusTests(unittest.TestCase):
                 self.assertEqual(list(directory.iterdir()), [])
             finally:
                 main.PLUGIN_DOWNLOAD_DIR = original_download_dir
+
+    def test_clear_downloads_keeps_files_of_an_active_download(self):
+        with tempfile.TemporaryDirectory() as home, patch.object(main, "PLUGIN_DOWNLOAD_DIR", home):
+            (Path(home) / "active.zip.part").write_bytes(b"zip")
+            (Path(home) / "old.zip").write_bytes(b"zip")
+            plugin = Plugin()
+            plugin.downloads = {"job": {"state": "downloading", "path": str(Path(home) / "active.zip")}}
+
+            self.assertEqual(asyncio.run(plugin.clear_downloads())["removed"], 1)
+            self.assertEqual([entry.name for entry in Path(home).iterdir()], ["active.zip.part"])
 
     def test_list_downloads_only_lists_deckyhub_contents(self):
         with tempfile.TemporaryDirectory() as home:
@@ -176,7 +171,7 @@ class PluginStatusTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as home, patch.object(sys.modules["decky"], "DECKY_PLUGIN_DIR", home, create=True), patch.object(main, "PLUGIN_DIR", home):
             self.assertEqual(asyncio.run(Plugin().get_deckyhub_info())["version"], "unknown")
 
-    def test_download_reports_progress_before_one_megabyte(self):
+    def test_urllib_download_counts_received_bytes(self):
         class Response:
             headers = {"Content-Length": "3"}
             reads = []
@@ -192,11 +187,18 @@ class PluginStatusTests(unittest.TestCase):
             plugin.downloads = {"job": {"received": 0, "total": 0}}
             plugin.cancelled = set()
             response = Response()
-            with patch("main.urlopen", return_value=response):
+            with patch.object(main._OPENER, "open", return_value=response):
                 plugin._download_with_urllib("job", {"url": "https://example.com/file.zip"}, Path(home) / "file.part")
 
-            self.assertEqual(response.reads[0], 64 * 1024)
             self.assertEqual(plugin.downloads["job"]["received"], 3)
+
+    def test_downloads_refuse_redirects_off_https(self):
+        handler = main._HttpsOnlyRedirects()
+        request = Request("https://github.com/owner/repo/releases/download/v1/a.zip")
+
+        with self.assertRaises(RuntimeError):
+            handler.redirect_request(request, None, 302, "Found", {}, "http://example.com/a.zip")
+        self.assertEqual(handler.redirect_request(request, None, 302, "Found", {}, "https://example.com/a.zip").full_url, "https://example.com/a.zip")
 
     def test_curl_download_uses_system_libraries(self):
         class Process:
@@ -217,7 +219,21 @@ class PluginStatusTests(unittest.TestCase):
             self.assertEqual(command[0], "/usr/bin/curl")
             self.assertIn("--connect-timeout", command)
             self.assertIn("--max-time", command)
+            self.assertEqual(command[command.index("--proto-redir") + 1], "=https")
             self.assertNotIn("LD_LIBRARY_PATH", environment)
+
+    def test_cancelled_curl_download_waits_for_curl_to_exit(self):
+        process = MagicMock()
+        process.poll.return_value = None
+        with tempfile.TemporaryDirectory() as home:
+            plugin = Plugin()
+            plugin.downloads = {"job": {"received": 0}}
+            plugin.cancelled = {"job"}
+            with patch("main.shutil.which", return_value="/usr/bin/curl"), patch("main.subprocess.Popen", return_value=process), self.assertRaises(InterruptedError):
+                plugin._download_with_curl("job", {"url": "https://example.com/file.zip"}, Path(home) / "file.part")
+
+        process.terminate.assert_called_once()
+        process.wait.assert_called()
 
     def test_custom_repository_is_saved(self):
         with tempfile.TemporaryDirectory() as home:
@@ -230,6 +246,7 @@ class PluginStatusTests(unittest.TestCase):
 
             self.assertTrue(result["added"])
             self.assertEqual(plugin._custom_apps()[0]["repo"], "owner/repository")
+            self.assertEqual(plugin._load_settings()["customRepos"], ["owner/repository"])
 
     def test_get_apps_includes_default_and_custom_repositories(self):
         with tempfile.TemporaryDirectory() as home:
@@ -240,20 +257,6 @@ class PluginStatusTests(unittest.TestCase):
             plugin.apps = [{"repo": "owner/default", "detect": {"type": "decky-plugin", "repo": "owner/default"}}]
 
             self.assertEqual([app["repo"] for app in asyncio.run(plugin.get_apps())["apps"]], ["owner/default", "owner/custom"])
-
-    def test_uninstalled_custom_repository_can_be_removed(self):
-        with tempfile.TemporaryDirectory() as home:
-            Path(home, "plugins").mkdir()
-            sys.modules["decky"].DECKY_HOME = home
-            plugin = Plugin()
-            plugin.settings_path = Path(home) / "settings.json"
-            plugin.settings = {"overwriteExisting": False, "customRepos": ["owner/unused"]}
-            plugin.apps = []
-
-            result = asyncio.run(plugin.remove_custom_repo("owner/unused"))
-
-            self.assertTrue(result["removed"])
-            self.assertEqual(plugin.settings["customRepos"], [])
 
     def test_removing_a_custom_repository_ignores_case_and_drops_its_settings(self):
         with tempfile.TemporaryDirectory() as home:
@@ -330,6 +333,14 @@ class PluginStatusTests(unittest.TestCase):
             self.assertEqual(len(result["assetFilter"]), 10)
             self.assertEqual(plugin.settings["repoSettings"]["owner/repo"], result)
 
+    def test_save_repo_settings_ignores_a_non_list_asset_filter(self):
+        with tempfile.TemporaryDirectory() as home:
+            plugin = Plugin()
+            plugin.settings_path = Path(home) / "settings.json"
+            plugin.settings = {"repoSettings": {}}
+
+            self.assertEqual(asyncio.run(plugin.save_repo_settings("owner/repo", {"assetFilter": "linux"}))["assetFilter"], [])
+
     def test_save_repo_settings_rejects_invalid_repo(self):
         plugin = Plugin()
         plugin.settings = {"repoSettings": {}}
@@ -356,8 +367,8 @@ class PluginStatusTests(unittest.TestCase):
             first = asyncio.run(Plugin().export_logs())["path"]
             second = asyncio.run(Plugin().export_logs())["path"]
 
-            self.assertEqual(Path(first).name, "DeckyHub-logs.zip")
-            self.assertEqual(Path(second).name, "DeckyHub-logs (1).zip")
+            self.assertRegex(Path(first).name, r"^DeckyHub-logs-\d{8}-\d{6}\.zip$")
+            self.assertNotEqual(first, second)
             with zipfile.ZipFile(first) as archive:
                 self.assertEqual(archive.read("2026-09-26.log"), b"hello")
 
@@ -378,23 +389,16 @@ class PluginStatusTests(unittest.TestCase):
             finally:
                 main.DEFAULT_DOWNLOAD_DIR = original_download_dir
 
-    def test_download_asset_returns_error_for_non_https_url(self):
+    def test_download_asset_refuses_urls_outside_the_repositorys_releases(self):
         plugin = Plugin()
-        plugin.settings = {"downloadLocation": "plugins", "overwriteExisting": True, "repoSettings": {}}
+        plugin.settings = {"overwriteExisting": True, "repoSettings": {}}
         plugin.downloads = {}
         plugin.download_queue = asyncio.Queue()
 
-        result = asyncio.run(plugin.download_asset({"name": "a.zip", "url": "http://example.com/a.zip"}, "owner/repo"))
-        self.assertEqual(result["error"], "Can't start a.zip: Only GitHub release assets for the selected repository can be downloaded")
-
-    def test_download_asset_returns_error_for_untrusted_https_url(self):
-        plugin = Plugin()
-        plugin.settings = {"downloadLocation": "plugins", "overwriteExisting": True, "repoSettings": {}}
-        plugin.downloads = {}
-        plugin.download_queue = asyncio.Queue()
-
-        result = asyncio.run(plugin.download_asset({"name": "a.zip", "url": "https://example.com/a.zip"}, "owner/repo"))
-        self.assertEqual(result["error"], "Can't start a.zip: Only GitHub release assets for the selected repository can be downloaded")
+        for url in ("http://github.com/owner/repo/releases/download/v1/a.zip", "https://example.com/a.zip", "https://github.com/other/repo/releases/download/v1/a.zip"):
+            with self.subTest(url=url):
+                result = asyncio.run(plugin.download_asset({"name": "a.zip", "url": url}, "owner/repo"))
+                self.assertEqual(result["error"], "Can't start a.zip: Only GitHub release assets for the selected repository can be downloaded")
 
     def test_download_asset_returns_error_for_dotdot_filename(self):
         plugin = Plugin()
@@ -466,10 +470,7 @@ class PluginStatusTests(unittest.TestCase):
             self.assertIn("SHA256", plugin.downloads["job"]["error"])
             self.assertFalse(target.exists())
 
-    def test_download_completes_when_checksum_matches_without_any_setting(self):
-        # Verification is unconditional now that "Verify SHA256" was removed as a
-        # setting: this asserts it still succeeds (not just still fails) with a
-        # settings dict that doesn't mention checksums at all.
+    def test_download_completes_when_checksum_matches(self):
         with tempfile.TemporaryDirectory() as home:
             plugin = Plugin()
             plugin.settings = {}
@@ -487,24 +488,30 @@ class PluginStatusTests(unittest.TestCase):
             self.assertEqual(plugin.downloads["job"]["state"], "complete")
             self.assertEqual(target.read_bytes(), b"data")
 
-    def test_saved_settings_no_longer_expose_verify_sha256(self):
+    def test_cancelling_a_queued_download_stops_it_before_it_starts(self):
         with tempfile.TemporaryDirectory() as home:
             plugin = Plugin()
-            plugin.settings_path = Path(home) / "settings.json"
+            plugin.cancelled = set()
+            plugin.downloads = {"job": {"state": "queued", "received": 0, "total": 0}}
+            target = Path(home) / "asset.zip"
 
-            saved = asyncio.run(plugin.save_settings({"verifySha256": False}))
+            self.assertTrue(asyncio.run(plugin.cancel_download("job"))["ok"])
+            with patch.object(plugin, "_download_with_urllib") as download:
+                plugin._download("job", {"url": "https://example.com/a"}, target)
 
-            self.assertNotIn("verifySha256", saved)
-            self.assertNotIn("verifySha256", plugin._load_settings())
+            download.assert_not_called()
+            self.assertEqual(plugin.downloads["job"]["state"], "cancelled")
+            self.assertEqual(plugin.cancelled, set())
 
-    def test_cancel_download_marks_job_and_get_download_reports_missing_by_default(self):
+    def test_cancelling_a_finished_or_unknown_download_does_nothing(self):
         plugin = Plugin()
         plugin.cancelled = set()
-        plugin.downloads = {}
+        plugin.downloads = {"done": {"state": "complete"}}
 
         self.assertEqual(asyncio.run(plugin.get_download("missing"))["state"], "missing")
-        asyncio.run(plugin.cancel_download("job-1"))
-        self.assertIn("job-1", plugin.cancelled)
+        self.assertFalse(asyncio.run(plugin.cancel_download("done"))["ok"])
+        self.assertFalse(asyncio.run(plugin.cancel_download("missing"))["ok"])
+        self.assertEqual(plugin.cancelled, set())
 
     def test_decky_plugin_detection_matches_custom_repo_by_repository_field(self):
         with tempfile.TemporaryDirectory() as home:

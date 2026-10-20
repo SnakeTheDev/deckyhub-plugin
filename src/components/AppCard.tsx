@@ -1,10 +1,10 @@
-import { toaster } from "@decky/api";
-import { DialogButtonPrimary as Button, PanelSection, PanelSectionRow, showModal } from "@decky/ui";
-import { FaCog, FaPlus } from "react-icons/fa";
+import { DialogButtonPrimary as Button, Navigation, PanelSection, PanelSectionRow, showModal } from "@decky/ui";
+import { useState } from "react";
+import { FaArrowUp, FaCog, FaPlus } from "react-icons/fa";
 import { useT } from "../i18n";
 import type { App, Asset, HideableButton, RepoPreference, UpdateChannel } from "../types";
-import { compactButtonStyle, cardDescriptionStyle, displayVersion, installAction, installDeckyPlugin, PLUGIN_INSTALL_TYPE, statusKey, statusColor, unverifiedLabel } from "../utils";
-import { AppDetailsModal } from "./AppDetailsModal";
+import { compactButtonStyle, cardDescriptionStyle, displayVersion, installAction, PLUGIN_INSTALL_TYPE, statusKey, statusColor } from "../utils";
+import { AppDetailsModal, startPluginInstall } from "./AppDetailsModal";
 
 export function AppCard({
   app,
@@ -24,43 +24,59 @@ export function AppCard({
   onUninstalled: () => void;
 }) {
   const t = useT();
-  // Quick install of the latest release for a not-yet-installed Decky plugin;
+  // Quick install/update to the latest release of a Decky plugin;
   // Manage still offers other versions/channels.
   const install = app.latestVersion ? installAction(app, { tag: app.latestVersion, assets: app.assets }) : null;
-  const canInstall = install?.type === PLUGIN_INSTALL_TYPE.INSTALL;
+  // Only offer Update when the card's own status says one is available.
+  const isUpdate = install?.type === PLUGIN_INSTALL_TYPE.UPDATE && app.updateAvailable === true;
+  const quickAction = install && (isUpdate || install.type === PLUGIN_INSTALL_TYPE.INSTALL) && !hiddenButtons.includes(isUpdate ? "update" : "install");
+  // Installs hand over to Decky's own dialog, so leave the Updates/Discover page.
+  const leavePage = () => Navigation.NavigateBack();
+  // Blocks a second tap from starting a second install while the first is handed over.
+  const [installing, setInstalling] = useState(false);
+  const latest = app.latestVersion ? displayVersion(app.latestVersion).replace(/^v/, "") : "";
+  const quickLabel = t(isUpdate ? "settings.updateTo" : "appcard.installVersion", { version: latest });
   return (
     <PanelSection title={app.name}>
       <PanelSectionRow>
         <div>
           <small style={cardDescriptionStyle}>{app.description || " "}</small>
           <span style={{ color: statusColor(app) }}>{t(statusKey(app))}</span>
+          {app.installedVersion && (
+            <>
+              <br />
+              <small>{t("settings.installedVersion", { version: displayVersion(app.installedVersion) })}</small>
+            </>
+          )}
           <br />
-          <small>{t("settings.installedVersion", { version: app.installedVersion ? displayVersion(app.installedVersion) : "—" })}</small>
-          <br />
-          <small>{t("settings.latestVersion", { version: app.latestVersion ? displayVersion(app.latestVersion) : "—" })}</small>
-          <br />
-          <small style={{ color: app.channel === "prerelease" ? "#ffa94d" : undefined }}>
-            {t("appcard.channel", { channel: t(app.channel === "prerelease" ? "appcard.channelPrerelease" : "appcard.channelStable") })}
-          </small>
+          {/* No release and no error yet: its GitHub check is still running. */}
+          <small>{t("settings.latestVersion", { version: app.latestVersion ? displayVersion(app.latestVersion) : app.error ? "—" : t("settings.checkingUpdate") })}</small>
+          {/* Stable is the default, so only a pre-release override earns a line. */}
+          {app.channel === "prerelease" && (
+            <>
+              <br />
+              <small style={{ color: "#ffa94d" }}>{t("appcard.channel", { channel: t("appcard.channelPrerelease") })}</small>
+            </>
+          )}
           {app.error && (
             <>
               <br />
-              <small>{app.error}</small>
+              <small style={{ color: "#ff6b6b" }}>{app.error}</small>
             </>
           )}
         </div>
       </PanelSectionRow>
-      {install && canInstall && !hiddenButtons.includes("install") && (
+      {install && quickAction && (
         <PanelSectionRow>
           <Button
             style={compactButtonStyle}
-            onClick={() =>
-              installDeckyPlugin(app.assets[0], install.name, app.latestVersion!, install.type).catch((error: unknown) =>
-                toaster.toast({ title: "DeckyHub", body: String(error) }),
-              )
-            }
+            disabled={installing}
+            onClick={() => {
+              setInstalling(true);
+              void startPluginInstall(t, app.name, app.assets[0], app.latestVersion!, install, quickLabel, leavePage).finally(() => setInstalling(false));
+            }}
           >
-            <FaPlus /> {unverifiedLabel(t, t("appcard.install"), install.verified)}
+            {isUpdate ? <FaArrowUp /> : <FaPlus />} {quickLabel}
           </Button>
         </PanelSectionRow>
       )}

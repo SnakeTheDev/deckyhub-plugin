@@ -1,5 +1,5 @@
 import { callable } from "@decky/api";
-import type { Asset, App, Settings, Download, DeckyHubInfo, ManagedRepo, RepoPreference } from "./types";
+import type { Asset, App, Settings, Download, DeckyHubInfo, RepoPreference } from "./types";
 
 export const getApps = callable<[], { apps: App[] }>("get_apps");
 export const getSettings = callable<[], Settings>("get_settings");
@@ -9,7 +9,7 @@ export const getDownload = callable<[jobId: string], Download>("get_download");
 export const cancelDownload = callable<[jobId: string], { ok: boolean }>("cancel_download");
 export const getDeckyHubInfo = callable<[], DeckyHubInfo>("get_deckyhub_info");
 export const addCustomRepo = callable<[repo: string], { added: boolean; repo: string }>("add_custom_repo");
-export const getCustomRepos = callable<[], { repos: ManagedRepo[] }>("get_custom_repos");
+export const getCustomRepos = callable<[], { repos: string[] }>("get_custom_repos");
 export const removeCustomRepo = callable<[repo: string], { removed: boolean; repo: string }>("remove_custom_repo");
 export const exportCustomRepos = callable<[], { path: string }>("export_custom_repos");
 export const importCustomRepos = callable<[path: string], { added: string[] }>("import_custom_repos");

@@ -6,6 +6,7 @@ import { clearDownloads, listDownloads } from "../api";
 import { useT } from "../i18n";
 import type { TFunc } from "../i18n/en";
 import { compactButtonStyle, modalButtonStyle, sectionDividerStyle, windowGap } from "../utils";
+import { KeepInView } from "./KeepInView";
 
 const CLEAR_LIST_LIMIT = 50;
 
@@ -53,8 +54,18 @@ export function CleanupSection() {
   const t = useT();
   const [downloads, setDownloads] = useState<DownloadEntry[]>([]);
 
+  // Re-read when the panel comes back into view, so downloads finished since
+  // it mounted show up.
   useEffect(() => {
-    void listDownloads().then(({ items }) => setDownloads(items));
+    const refresh = () => void listDownloads().then(({ items }) => setDownloads(items), () => undefined);
+    const onVisible = () => document.visibilityState === "visible" && refresh();
+    refresh();
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, []);
 
   const clear = () =>
@@ -69,13 +80,15 @@ export function CleanupSection() {
   return (
     <>
       <div aria-hidden style={sectionDividerStyle} />
-      <PanelSection title={t("settings.cleanup")}>
-        <PanelSectionRow>
-          <Button style={compactButtonStyle} onClick={() => showModal(<ClearDownloadsModal t={t} downloads={downloads} onConfirm={clear} />)}>
-            <FaTrash /> {t("settings.emptyFolder")}
-          </Button>
-        </PanelSectionRow>
-      </PanelSection>
+      <KeepInView>
+        <PanelSection title={t("settings.cleanup")}>
+          <PanelSectionRow>
+            <Button style={compactButtonStyle} onClick={() => showModal(<ClearDownloadsModal t={t} downloads={downloads} onConfirm={clear} />)}>
+              <FaTrash /> {t("settings.emptyFolder")}
+            </Button>
+          </PanelSectionRow>
+        </PanelSection>
+      </KeepInView>
     </>
   );
 }

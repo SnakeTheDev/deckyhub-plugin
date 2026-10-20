@@ -62,6 +62,9 @@ No setup, no configuration — these show up in Discover the moment you install 
 | CSS Loader | Customization | [DeckThemes/SDH-CssLoader](https://github.com/DeckThemes/SDH-CssLoader) |
 | Deck as Controller | Controllers | [jmedina21/deck-as-controller](https://github.com/jmedina21/deck-as-controller) |
 | BGFX | Frame Generation | [andrewmd5/decky-bgfx](https://github.com/andrewmd5/decky-bgfx) |
+| ThemeHub | Customization | [Kaal31/benderthemes](https://github.com/Kaal31/benderthemes) |
+| Spindeck | Customization | [justinca92/spindeck](https://github.com/justinca92/spindeck) |
+| Game Glance | Customization | [michpalm/game-glance](https://github.com/michpalm/game-glance) |
 
 Want more? Add any other GitHub repository from **Repositories** in seconds.
 
@@ -76,7 +79,7 @@ Want more? Add any other GitHub repository from **Repositories** in seconds.
 
 ### Discover
 
-Browse the bundled list or search within it, and filter by **Status** — All, Installed, or Not Installed. Each card is color-coded (green once it's up to date, yellow when an update is available, red on an error) so you can spot what needs attention at a glance, and shows which release **Channel** (stable or pre-release) it's tracking. Tap **Manage** on any card to pick a channel and version, then download the release asset you want.
+Browse the bundled list or search it by name, repository, category or description, and filter by **Status** — All, Installed, or Not Installed. Each card is color-coded (green once it's up to date, yellow when an update is available, red on an error) so you can spot what needs attention at a glance, and says **Checking…** while its latest release is still being looked up. A card set to the pre-release **Channel** says so; stable is the default and isn't labelled. Tap **Manage** on any card to pick a channel and version, then download the release asset you want.
 
 To track a repository that isn't in the curated list, go to **Repositories**, search for it, and add it — it'll show up in Discover from then on.
 
@@ -88,9 +91,9 @@ Shows every tracked tool that's installed and has a newer release available, alo
 
 Tap **Manage** on any card in Discover or Updates to:
 
-- pick the release **channel** (stable or pre-release) and a specific **version**;
+- pick the release **channel** and a specific **version**. **Stable** shows only stable releases; **Pre-release** shows every release, newest first, so a stable release that comes out after the last pre-release is still offered;
 - **Download ZIP**, open the **Release Page**, or **Check for Updates** for that app;
-- for a Decky plugin, **Install** (not installed yet) or **Update** (the selected version is newer than the installed one). This hands the release ZIP to Decky Loader's own installer, the same one the Decky Store uses. Decky asks you to confirm and installs it, verifying the SHA-256 checksum GitHub publishes for the ZIP. Older releases (files uploaded before mid-2025) have no checksum; for those the button reads **Install (unverified)** / **Update (unverified)** and Decky installs without that check;
+- for a Decky plugin, **Install** (not installed yet) or **Update** (the selected version is newer than the installed one). This hands the release ZIP to Decky Loader's own installer, the same one the Decky Store uses. Decky asks you to confirm and installs it, verifying the SHA-256 checksum GitHub publishes for the ZIP. Older releases (files uploaded before mid-2025) have no checksum and Decky installs them without that check;
 - for an installed Decky plugin, **Uninstall**, which asks you to confirm and then removes the plugin and its settings through Decky Loader.
 
 ### Downloads
@@ -107,7 +110,7 @@ To switch a tracked app between stable and pre-release releases, use its [Manage
 
 ### Keeping DeckyHub itself updated
 
-Settings includes a **Check Update** option that looks for new stable releases (or pre-releases, if you opt in) of DeckyHub itself. A newer release triggers a notification; if you're already on the latest, it says no update is available. When an update is available, you get two ways to install it:
+Settings includes a **Check Update** option that looks for new stable releases of DeckyHub itself (or every release, pre-releases included, if you opt in). A newer release triggers a notification; if you're already on the latest, it says no update is available. When an update is available, you get two ways to install it:
 
 - **Update Automatically** — hands the release off to Decky Loader's own installer (the same one the Decky Store uses), which downloads, verifies, and installs it in place. No manual ZIP step needed.
 - **Download ZIP** — the classic path: saves the update ZIP to `/home/deck/Downloads/deckyhub`, which you then install yourself via Decky → Developer → Install Plugin from ZIP.

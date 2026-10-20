@@ -73,9 +73,18 @@ def call_route(route: str, args: list):
     return asyncio.run_coroutine_threadsafe(method(*args), loop).result(timeout=30)
 
 
+# Only the mock UI (vite on :5183) may call the bridge. A cross-site page can
+# still send a "simple" POST without a preflight, so check Origin before
+# running anything, not just in the CORS response headers.
+ALLOWED_ORIGINS = {"http://127.0.0.1:5183", "http://localhost:5183"}
+
+
 class Handler(BaseHTTPRequestHandler):
     def _cors(self):
-        self.send_header("Access-Control-Allow-Origin", "*")
+        origin = self.headers.get("Origin")
+        if origin in ALLOWED_ORIGINS:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
 
@@ -97,6 +106,9 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self):
+        if self.headers.get("Origin") not in ALLOWED_ORIGINS:
+            self.send_error(403, "Origin not allowed")
+            return
         length = int(self.headers.get("Content-Length", 0))
         payload = json.loads(self.rfile.read(length) or b"{}")
         try:

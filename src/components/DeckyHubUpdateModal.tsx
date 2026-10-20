@@ -1,12 +1,13 @@
-import { DialogButtonPrimary as Button, Focusable, ModalRoot, Navigation, ProgressBar } from "@decky/ui";
-import { useEffect, useRef, useState } from "react";
-import { FaDownload, FaExternalLinkAlt, FaFileArchive, FaSync, FaTimes } from "react-icons/fa";
+import { toaster } from "@decky/api";
+import { DialogButtonPrimary as Button, ModalRoot } from "@decky/ui";
+import { useState } from "react";
+import { FaDownload, FaFileArchive, FaTimes } from "react-icons/fa";
 import { downloadAsset, getSettings, saveSettings } from "../api";
 import type { TFunc } from "../i18n/en";
 import type { Asset, DeckyHubInfo, DeckyHubReleaseOption, UpdateChannel, HideableButton } from "../types";
-import { PLUGIN_INSTALL_TYPE, buildVersionOptions, getDeckyBackend, installDeckyPlugin, installTypeLabel, listDeckyHubReleases, modalButtonStyle, normalizeVersion, resolveDeckyHubInstallType, sectionDividerStyle, selectDefaultTag, selfUpdateStageKey, windowGap } from "../utils";
+import { PLUGIN_INSTALL_TYPE, buildVersionOptions, getDeckyBackend, installDeckyPlugin, installTypeLabel, listDeckyHubReleases, modalButtonStyle, normalizeVersion, resolveDeckyHubInstallType, sectionDividerStyle, windowGap } from "../utils";
 import { showDownloadModal } from "./DownloadProgress";
-import { VersionPickerPanel } from "./VersionPickerPanel";
+import { ReleaseActions, useReleasePicker, VersionPickerPanel } from "./VersionPickerPanel";
 
 const PLUGIN_NAME = "DeckyHub";
 
@@ -26,84 +27,28 @@ export function DeckyHubUpdateModal({
   t: TFunc;
   info: DeckyHubInfo;
   channel: UpdateChannel;
-  onCheckUpdate: () => void;
+  onCheckUpdate: (channel: UpdateChannel) => void;
   onChannelChange: (channel: UpdateChannel) => void;
   hiddenButtons: HideableButton[];
   closeModal?: () => void;
 }) {
   const [channel, setChannel] = useState(initialChannel);
-  const [versions, setVersions] = useState<DeckyHubReleaseOption[]>([]);
-  const [selectedTag, setSelectedTag] = useState("");
-  const [loadingVersions, setLoadingVersions] = useState(true);
-  const [fetchError, setFetchError] = useState<string | null>(null);
+  const { items: versions, selectedTag, setSelectedTag, loading: loadingVersions, error: fetchError, load, selected: selectedRelease } = useReleasePicker(listDeckyHubReleases, channel);
   const [checking, setChecking] = useState(false);
   const [downloading, setDownloading] = useState(false);
-  const [selfUpdating, setSelfUpdating] = useState(false);
-  const [selfUpdateProgress, setSelfUpdateProgress] = useState(0);
-  const [selfUpdateStatus, setSelfUpdateStatus] = useState("");
   const [selfUpdateError, setSelfUpdateError] = useState<string | null>(null);
-  const selfUpdatingRef = useRef(false);
 
-  const loadVersions = async (forChannel: UpdateChannel, { pinLatest = false } = {}) => {
-    setLoadingVersions(true);
-    const { items, error } = await listDeckyHubReleases(pinLatest);
-    const filtered = items.filter((item) => item.prerelease === (forChannel === "prerelease"));
-    setVersions(filtered);
-    setFetchError(error ?? null);
-    setSelectedTag((current) => selectDefaultTag(filtered, current, pinLatest));
-    setLoadingVersions(false);
-  };
-
-  useEffect(() => {
-    void loadVersions(channel);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [channel]);
-
-  // Mirrors Decky Loader's own install progress for a self-update — the
-  // loader pops its own native confirm/progress dialog on top of this one,
-  // so this is best-effort feedback for whenever this modal is still visible.
-  useEffect(() => {
-    const backend = getDeckyBackend();
-    if (!backend) return;
-    const onStart = (name: string) => {
-      if (name !== PLUGIN_NAME) return;
-      selfUpdatingRef.current = true;
-      setSelfUpdating(true);
-      setSelfUpdateProgress(0);
-      setSelfUpdateStatus(t(selfUpdateStageKey("start")));
-    };
-    const onInfo = (percent: number, key?: string) => {
-      if (!selfUpdatingRef.current) return;
-      setSelfUpdateProgress(percent);
-      setSelfUpdateStatus(t(selfUpdateStageKey(key)));
-    };
-    const onFinish = (name: string) => {
-      if (name !== PLUGIN_NAME) return;
-      selfUpdatingRef.current = false;
-      setSelfUpdateProgress(100);
-      setSelfUpdating(false);
-    };
-    backend.addEventListener("loader/plugin_download_start", onStart);
-    backend.addEventListener("loader/plugin_download_info", onInfo);
-    backend.addEventListener("loader/plugin_download_finish", onFinish);
-    return () => {
-      backend.removeEventListener("loader/plugin_download_start", onStart);
-      backend.removeEventListener("loader/plugin_download_info", onInfo);
-      backend.removeEventListener("loader/plugin_download_finish", onFinish);
-    };
-  }, [t]);
-
-  const selectedRelease = versions.find((item) => item.tag === selectedTag) ?? null;
-  const busy = checking || downloading || selfUpdating || loadingVersions;
+  const busy = checking || downloading || loadingVersions;
 
   const refresh = async () => {
     setChecking(true);
-    onCheckUpdate();
     try {
-      await loadVersions(channel, { pinLatest: true });
+      await load(true);
     } finally {
       setChecking(false);
     }
+    // Reads the release list load(true) just cached, to update the panel button.
+    onCheckUpdate(channel);
   };
 
   const changeChannel = async (next: UpdateChannel) => {
@@ -113,23 +58,18 @@ export function DeckyHubUpdateModal({
     void getSettings().then((settings) => saveSettings({ ...settings, updateChannel: next }));
   };
 
-  const selfUpdate = async (release: DeckyHubReleaseOption) => {
-    const asset = release.asset;
-    if (!asset) return;
-    const backend = getDeckyBackend();
-    if (!backend) {
+  // Every action but Check for Updates and Download ZIP closes this window;
+  // Decky's own confirm/progress dialog takes over the install.
+  const selfUpdate = (release: DeckyHubReleaseOption) => {
+    if (!release.asset) return;
+    if (!getDeckyBackend()) {
       setSelfUpdateError(t("settings.selfUpdateUnavailable"));
       return;
     }
-    setSelfUpdateError(null);
-    const installType = resolveDeckyHubInstallType(release.version, info.version);
-    try {
-      await installDeckyPlugin(asset, PLUGIN_NAME, release.version, installType);
-    } catch (error) {
-      selfUpdatingRef.current = false;
-      setSelfUpdating(false);
-      setSelfUpdateError(String(error));
-    }
+    closeModal?.();
+    installDeckyPlugin(release.asset, PLUGIN_NAME, release.tag, resolveDeckyHubInstallType(release.tag, info.version)).catch((error: unknown) =>
+      toaster.toast({ title: "DeckyHub", body: String(error) }),
+    );
   };
 
   const downloadZip = async (asset: Asset) => {
@@ -141,15 +81,15 @@ export function DeckyHubUpdateModal({
         showDownloadModal(t, result.jobId, { state: "queued", filename: asset.name, total: asset.size }, () => setDownloading(false));
       }
     } catch (error) {
-      setFetchError(String(error));
+      setSelfUpdateError(String(error));
     }
   };
 
   const versionOptions = buildVersionOptions(versions, info.version, t);
 
-  const displayVersion = selectedRelease ? normalizeVersion(selectedRelease.version) : "";
-  const installType = selectedRelease ? resolveDeckyHubInstallType(selectedRelease.version, info.version) : PLUGIN_INSTALL_TYPE.UPDATE;
-  const primaryLabel = selfUpdating ? t("settings.selfUpdating") : installTypeLabel(t, installType, displayVersion);
+  const displayVersion = selectedRelease ? normalizeVersion(selectedRelease.tag) : "";
+  const installType = selectedRelease ? resolveDeckyHubInstallType(selectedRelease.tag, info.version) : PLUGIN_INSTALL_TYPE.UPDATE;
+  const primaryLabel = installTypeLabel(t, installType, displayVersion);
 
   return (
     <ModalRoot closeModal={closeModal}>
@@ -167,13 +107,6 @@ export function DeckyHubUpdateModal({
           error={fetchError || selfUpdateError}
           isEmpty={!loadingVersions && !fetchError && versions.length === 0}
         />
-
-        {selfUpdating && (
-          <div style={{ display: "grid", gap: 6 }}>
-            <ProgressBar indeterminate={!selfUpdateProgress} nProgress={selfUpdateProgress} />
-            <small style={{ color: "#8fcef4" }}>{selfUpdateStatus}</small>
-          </div>
-        )}
 
         <div aria-hidden style={sectionDividerStyle} />
 
@@ -197,21 +130,7 @@ export function DeckyHubUpdateModal({
           </>
         )}
 
-        <Focusable style={{ display: "flex", gap: 8 }}>
-          {selectedRelease?.url && !hiddenButtons.includes("releasePage") && (
-            <Button style={{ ...modalButtonStyle, flex: 1 }} onClick={() => {
-                // Close first: Steam's browser otherwise opens underneath this modal.
-                closeModal?.();
-                Navigation.NavigateToExternalWeb(selectedRelease.url);
-              }}
-            >
-              <FaExternalLinkAlt /> {t("appcard.releasePage")}
-            </Button>
-          )}
-          <Button style={{ ...modalButtonStyle, flex: 1 }} disabled={busy} onClick={() => void refresh()}>
-            <FaSync /> {checking ? t("settings.checkingUpdate") : t("settings.checkUpdate")}
-          </Button>
-        </Focusable>
+        <ReleaseActions t={t} url={selectedRelease?.url} hideReleasePage={hiddenButtons.includes("releasePage")} checking={checking} disabled={busy} onCheck={() => void refresh()} closeModal={closeModal} />
 
         <Button style={modalButtonStyle} onClick={closeModal}>
           <FaTimes /> {t("settings.close")}

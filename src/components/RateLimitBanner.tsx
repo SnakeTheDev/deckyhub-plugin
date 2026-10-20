@@ -2,6 +2,7 @@ import { DialogButtonPrimary as Button, Focusable, Navigation } from "@decky/ui"
 import { useEffect, useState } from "react";
 import { FaCog, FaTimes } from "react-icons/fa";
 import { useT } from "../i18n";
+import { keepInView } from "./KeepInView";
 import { iconRow, RATE_LIMIT_CHANGED, rateLimit } from "../utils";
 
 const bannerButton = { ...iconRow, flex: 1, minHeight: 32, padding: "4px 10px" };
@@ -28,7 +29,7 @@ export function RateLimitBanner() {
   const minutes = Math.max(1, Math.ceil(remaining / 60_000));
 
   return (
-    <div className="deckyhub-rate-limit" role="status" style={{ background: "rgba(240, 195, 60, 0.12)", borderLeft: "3px solid #f0c33c", borderRadius: 4, display: "grid", gap: 6, marginBottom: 12, padding: "8px 10px" }}>
+    <div className="deckyhub-rate-limit" role="status" onFocus={keepInView} style={{ background: "rgba(240, 195, 60, 0.12)", borderLeft: "3px solid #f0c33c", borderRadius: 4, display: "grid", gap: 6, marginBottom: 12, padding: "8px 10px" }}>
       <strong style={{ color: "#f0c33c" }}>{t("rateLimit.title")}</strong>
       <small>
         {limit.minutesKnown ? t("rateLimit.retryIn", { minutes }) : t("rateLimit.retryLater")} {t("rateLimit.howToAvoid")}

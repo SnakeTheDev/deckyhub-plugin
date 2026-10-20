@@ -2,6 +2,9 @@ import { fetchNoCors, toaster } from "@decky/api";
 import { getSettings, logFrontend } from "./api";
 import { en, type MessageKey, type TFunc } from "./i18n/en";
 import type { App, AppReleaseOption, Asset, DeckyHubRelease, DeckyHubReleaseOption, RepoPreference, UpdateChannel } from "./types";
+import { compareVersions, displayVersion, inChannel, normalizeVersion } from "./version";
+
+export { displayVersion, inChannel, normalizeVersion };
 
 // GitHub's unauthenticated core API allows 60 requests/hour per IP, easy to
 // burn through when Discover/Updates check every tracked app. Release lists
@@ -9,7 +12,7 @@ import type { App, AppReleaseOption, Asset, DeckyHubRelease, DeckyHubReleaseOpti
 // every cache read is bypassed by force=true wherever the user explicitly asks
 // to check (Refresh, Check for Updates).
 export const CACHE_TTL = 30 * 60 * 1000;
-export const UPDATE_NOTICE_KEY = "deckyhub-update-notice";
+const UPDATE_NOTICE_KEY = "deckyhub-update-notice";
 export const DEFAULT_COLUMNS_PER_ROW = 3;
 export const pageStyle = { boxSizing: "border-box" as const, height: "100%", overflowY: "auto" as const, padding: "64px 12px 96px", scrollPaddingBottom: 96, scrollPaddingTop: 64, width: "100%" };
 // Sizes read CSS variables that fall back to the Default density; the Compact
@@ -70,10 +73,6 @@ export function setTranslator(t: TFunc) {
   tr = t;
 }
 
-function fetchWithTimeout(input: string, init?: RequestInit) {
-  return fetchNoCors(input, { ...init, signal: AbortSignal.timeout(15_000) });
-}
-
 // GitHub's unauthenticated REST API allows only 60 requests/hour (10/min for
 // search) per device, versus 5,000/hour once a personal access token is set
 // in Settings — see setGithubToken(). Held in module scope (not React state)
@@ -99,8 +98,13 @@ export function reportRateLimit(minutes: number | null, until = Date.now() + (mi
   window.dispatchEvent(new Event(RATE_LIMIT_CHANGED));
 }
 
+// No headers unless a token is set: any header makes fetchNoCors a CORS
+// preflight to Decky Loader, and on a real Deck those preflights have been
+// seen to stall forever (loader never reads them; Chrome's 6-socket pool for
+// them fills up), hanging every GitHub call until its timeout. GitHub's
+// default response is the same JSON the vnd.github+json Accept asked for.
 function githubHeaders(): Record<string, string> {
-  return githubToken ? { Accept: "application/vnd.github+json", Authorization: `Bearer ${githubToken}` } : { Accept: "application/vnd.github+json" };
+  return githubToken ? { Authorization: `Bearer ${githubToken}` } : {};
 }
 
 // React runs a child's effects before its parent's, so the first GitHub call
@@ -108,10 +112,13 @@ function githubHeaders(): Record<string, string> {
 // it once here instead of spending that call unauthenticated.
 let tokenLoaded: Promise<void> | null = null;
 
-export async function githubFetch(url: string, headers: Record<string, string> = {}) {
-  tokenLoaded ??= getSettings().then((settings) => setGithubToken(settings.githubToken || ""), () => undefined);
+export async function githubFetch(url: string) {
+  // A failed settings read is retried on the next call rather than kept.
+  tokenLoaded ??= getSettings().then((settings) => setGithubToken(settings.githubToken || ""), () => {
+    tokenLoaded = null;
+  });
   await tokenLoaded;
-  return fetchWithTimeout(url, { headers: { ...githubHeaders(), ...headers } });
+  return fetchNoCors(url, { headers: githubHeaders(), signal: AbortSignal.timeout(15_000) });
 }
 
 // GitHub's REST API is what every fetch in this file hits — unauthenticated
@@ -156,12 +163,12 @@ export const readableBytes = (bytes = 0) => (bytes > 1024 * 1024 ? `${(bytes / 1
 export const statusKey = (app: App): MessageKey =>
   !app.installedVersion ? "filter.notInstalled" : app.updateAvailable ? "status.updateAvailable" : app.updateAvailable === false ? "status.upToDate" : "filter.installed";
 
-export const statusColor = (app: App) => (!app.installedVersion || app.error ? "#ff6b6b" : app.updateAvailable ? "#f0c33c" : app.updateAvailable === false ? "#6bcb6b" : undefined);
+export const statusColor = (app: App) => (app.error ? "#ff6b6b" : !app.installedVersion ? "#8b929a" : app.updateAvailable ? "#f0c33c" : app.updateAvailable === false ? "#6bcb6b" : undefined);
 
-// fetchReleases' localStorage envelope: when it was fetched (for CACHE_TTL),
-// the data, and GitHub's ETag for a free conditional re-check. Only
-// successful results are ever written, so a failure never "poisons" it.
-type CacheEntry<T> = { at: number; data: T; etag?: string };
+// fetchReleases' localStorage envelope: when it was fetched (for CACHE_TTL)
+// and the data. Only successful results are ever written, so a failure never
+// "poisons" it. No ETag re-check: If-None-Match is a header, see githubHeaders().
+type CacheEntry<T> = { at: number; data: T };
 
 function readCache<T>(key: string): CacheEntry<T> | null {
   try {
@@ -171,45 +178,25 @@ function readCache<T>(key: string): CacheEntry<T> | null {
   }
 }
 
-function writeCache(key: string, data: unknown, etag?: string | null): void {
+function writeCache(key: string, data: unknown): void {
   try {
-    localStorage.setItem(key, JSON.stringify({ at: Date.now(), data, etag: etag || undefined }));
+    localStorage.setItem(key, JSON.stringify({ at: Date.now(), data }));
   } catch {
     // Quota exceeded or storage disabled (private browsing) — caching is a
     // nice-to-have, never worth failing the fetch that already succeeded.
   }
 }
 
-export const normalizeVersion = (value: string) => value.trim().replace(/^v/i, "");
-
-// One display format for every version: "v" + the version number, keeping a
-// pre-release suffix — "plugin-v3.3.0" → v3.3.0, "Release-0.7.5" → v0.7.5,
-// "1.0.3-rc.2" → v1.0.3-rc.2. Anything without a version number is shown as is.
-export function displayVersion(value: string) {
-  const match = value.match(/(\d+(?:\.\d+)+)(-[0-9A-Za-z.-]+)?/);
-  return match ? `v${match[1]}${match[2] ?? ""}` : value;
-}
-
-// Shared by DeckyHubUpdateModal and AppDetailsModal's version pickers: keep
-// the current selection if it's still present in the (channel-filtered)
-// list and this isn't a forced refresh, otherwise fall back to the newest
-// item. "Check for Updates"/"Refresh" (pinLatest) overrides a still-valid
-// manual selection on purpose, since that's the point of explicitly checking.
-export function selectDefaultTag<T extends { tag: string }>(filtered: T[], current: string, pinLatest: boolean): string {
-  if (!pinLatest && current && filtered.some((item) => item.tag === current)) return current;
-  return filtered[0]?.tag ?? "";
-}
-
-// Shared by the same two version pickers: label each release with "v" plus
+// Shared by both version pickers: label each release with "v" plus
 // an "(installed)"/"(latest)" suffix — items[0] is the newest since every
 // release-list fetch above sorts by publish date before returning.
-export function buildVersionOptions<T extends { tag: string; version: string }>(items: T[], installedVersion: string | null | undefined, t: TFunc): { data: string; label: string }[] {
+export function buildVersionOptions<T extends { tag: string }>(items: T[], installedVersion: string | null | undefined, t: TFunc): { data: string; label: string }[] {
   return items.map((item) => {
-    const version = normalizeVersion(item.version);
+    const version = normalizeVersion(item.tag);
     const isInstalled = Boolean(installedVersion) && version === normalizeVersion(installedVersion!);
     const isLatest = items[0]?.tag === item.tag;
     const suffix = isInstalled ? ` (${t("settings.installedLabel")})` : isLatest ? ` (${t("settings.latestLabel")})` : "";
-    return { data: item.tag, label: `${displayVersion(item.version)}${suffix}` };
+    return { data: item.tag, label: `${displayVersion(item.tag)}${suffix}` };
   });
 }
 
@@ -218,43 +205,8 @@ export function buildVersionOptions<T extends { tag: string; version: string }>(
 // kind of operation this is.
 export const PLUGIN_INSTALL_TYPE = { INSTALL: 0, REINSTALL: 1, UPDATE: 2, DOWNGRADE: 3 } as const;
 
-// The version number and pre-release suffix inside a tag or version string —
-// the same part displayVersion() shows: "plugin-v3.3.0" → 3.3.0,
-// "1.0.3-rc.2" → 1.0.3 + "rc.2". Null when there's no dotted version number.
-function parseVersion(value: string) {
-  const match = value.match(/(\d+(?:\.\d+)+)(?:-([0-9A-Za-z.-]+))?/);
-  return match ? { release: match[1].split(".").map(Number), prerelease: match[2] ?? null } : null;
-}
-
-// A version with no pre-release suffix outranks the same release number with
-// one ("1.0.3" > "1.0.3-rc.9"); between two suffixed versions, compare their
-// trailing number ("rc.2" > "rc.1"), falling back to plain string order if a
-// suffix doesn't end in one (covers anything other than "-rc.N" gracefully).
-function comparePrerelease(target: string | null, current: string | null): number {
-  if (target === current) return 0;
-  if (target === null) return 1;
-  if (current === null) return -1;
-  const targetNumber = Number(target.match(/(\d+)$/)?.[1]);
-  const currentNumber = Number(current.match(/(\d+)$/)?.[1]);
-  if (!Number.isNaN(targetNumber) && !Number.isNaN(currentNumber) && targetNumber !== currentNumber) return targetNumber > currentNumber ? 1 : -1;
-  return target > current ? 1 : target < current ? -1 : 0;
-}
-
-// 1 / -1 / 0 as target is newer / older / the same as current, or null when
-// either has no version number. Used for DeckyHub itself and every tracked
-// app, so pre-release suffixes count everywhere (rc.1 → rc.2 → final).
-function compareVersions(target: string, current: string): number | null {
-  const a = parseVersion(target), b = parseVersion(current);
-  if (!a || !b) return null;
-  for (let i = 0; i < Math.max(a.release.length, b.release.length); i++) {
-    const diff = (a.release[i] || 0) - (b.release[i] || 0);
-    if (diff) return Math.sign(diff);
-  }
-  return comparePrerelease(a.prerelease, b.prerelease);
-}
-
 export function resolveDeckyHubInstallType(latestVersion: string, installedVersion: string): 1 | 2 | 3 {
-  const cmp = installedVersion === "unknown" ? 1 : compareVersions(latestVersion, installedVersion) ?? 1;
+  const cmp = compareVersions(latestVersion, installedVersion) ?? 1;
   return cmp > 0 ? PLUGIN_INSTALL_TYPE.UPDATE : cmp < 0 ? PLUGIN_INSTALL_TYPE.DOWNGRADE : PLUGIN_INSTALL_TYPE.REINSTALL;
 }
 
@@ -278,12 +230,38 @@ export const getDeckyBackend = () => window.DeckyBackend ?? window.opener?.Decky
 // Hands a verified release ZIP to Decky Loader's own installer — the route the
 // Decky Store uses. The loader shows its native confirm/progress dialog and
 // does the download, SHA-256 check and install itself.
-export function installDeckyPlugin(asset: Asset, pluginName: string, version: string, installType: 0 | 1 | 2 | 3) {
+//
+// Plugins that are uninstalled first and then installed fresh instead of
+// updated in place. Decky Loader's in-place update uninstalls the old version
+// mid-install, which turns its file watcher back on: the watcher starts the new
+// version while it's still being installed, and the installer then stops that
+// copy seconds into its startup. Unifideck hangs there, and Decky grew to 9.6 GB
+// and froze the Deck. A fresh install keeps the watcher off throughout.
+const FRESH_INSTALL_PLUGINS = ["Unifideck"];
+
+export const needsFreshInstall = (pluginName: string, installType: number) => installType !== PLUGIN_INSTALL_TYPE.INSTALL && FRESH_INSTALL_PLUGINS.includes(pluginName);
+
+export async function installDeckyPlugin(asset: Asset, pluginName: string, version: string, installType: 0 | 1 | 2 | 3) {
+  if (needsFreshInstall(pluginName, installType)) {
+    await uninstallDeckyPlugin(pluginName);
+    log(`Decky Loader uninstalled ${pluginName} before a fresh install`);
+    installType = PLUGIN_INSTALL_TYPE.INSTALL;
+  }
   traceDeckyInstall(pluginName);
   return callDeckyLoader("utilities/install_plugin", asset.url, pluginName, normalizeVersion(displayVersion(version)), asset.sha256 ?? "", installType).then((result: unknown) => {
     log(`Decky Loader install_plugin ${pluginName} accepted, waiting for confirm/progress`);
     return result;
   });
+}
+
+// Several updates in one go: Decky Loader shows one confirm dialog listing them
+// all and installs them in order. Fresh-install plugins need their uninstall
+// first, so callers leave them out.
+export function updateDeckyPlugins(updates: { asset: Asset; name: string; version: string }[]) {
+  return callDeckyLoader(
+    "utilities/install_plugins",
+    updates.map(({ asset, name, version }) => ({ artifact: asset.url, name, version: normalizeVersion(displayVersion(version)), hash: asset.sha256 ?? "", install_type: PLUGIN_INSTALL_TYPE.UPDATE })),
+  );
 }
 
 // Logs every stage Decky Loader reports for this install, with elapsed time,
@@ -294,10 +272,29 @@ function traceDeckyInstall(pluginName: string) {
   if (!backend) return;
   const started = Date.now();
   const elapsed = () => `${((Date.now() - started) / 1000).toFixed(1)}s`;
-  const onStart = (name: string) => log(`Decky install start ${name} at ${elapsed()}`);
-  const onInfo = (progress: number, stage: string) => log(`Decky install ${pluginName} ${progress}% ${stage} at ${elapsed()}`);
+  // Decky can fail an install without ever sending finish (e.g. a remote_binary
+  // download error leaves it at 95%), so warn once its events go quiet.
+  // Remote binaries download with no progress events, so that stage gets longer.
+  let idleTimer = 0;
+  const armIdle = (stage?: string) => {
+    window.clearTimeout(idleTimer);
+    idleTimer = window.setTimeout(() => {
+      log(`Decky install ${pluginName}: no progress after ${elapsed()} — check journalctl -u plugin_loader`);
+      toaster.toast({ title: tr("toast.installStalledTitle", { name: pluginName }), body: tr("toast.installStalledBody") });
+      stop();
+    }, stage?.endsWith("download_remote") ? 120_000 : 45_000);
+  };
+  const onStart = (name: string) => {
+    log(`Decky install start ${name} at ${elapsed()}`);
+    if (name === pluginName) armIdle();
+  };
+  const onInfo = (progress: number, stage: string) => {
+    log(`Decky install ${pluginName} ${progress}% ${stage} at ${elapsed()}`);
+    armIdle(stage);
+  };
   const stop = () => {
     window.clearTimeout(timer);
+    window.clearTimeout(idleTimer);
     backend.removeEventListener("loader/plugin_download_start", onStart);
     backend.removeEventListener("loader/plugin_download_info", onInfo);
     backend.removeEventListener("loader/plugin_download_finish", onFinish);
@@ -335,39 +332,15 @@ function callDeckyLoader(route: string, ...args: unknown[]) {
 // What the Manage window can hand to Decky Loader's installer for the selected
 // release, if anything: "Update" for an installed Decky plugin when
 // the release is newer, "Install" for a registry Decky plugin that isn't
-// installed yet — either way only when its ZIP carries a checksum the loader
-// can verify. A fresh install has no installed manifest to name it, so it
+// installed yet. A fresh install has no installed manifest to name it, so it
 // uses the detection rule's first name (the plugin's manifest name).
 // Releases without a GitHub checksum (assets uploaded before mid-2025) can
-// still be installed; Decky Loader skips verification for an empty hash, so
-// the button says "unverified".
-export function installAction(app: App, release: { tag: string; assets: Asset[] }): { type: 0 | 1 | 2 | 3; name: string; verified: boolean } | null {
+// still be installed; Decky Loader skips verification for an empty hash.
+export function installAction(app: App, release: { tag: string; assets: Asset[] }): { type: 0 | 1 | 2 | 3; name: string } | null {
   if (!release.assets[0]) return null;
-  const verified = Boolean(release.assets[0].sha256);
-  if (app.pluginName) return { type: resolveDeckyHubInstallType(release.tag, app.installedVersion ?? "unknown"), name: app.pluginName, verified };
-  if (!app.installedVersion && app.detect?.type === "decky-plugin") return { type: PLUGIN_INSTALL_TYPE.INSTALL, name: app.detect.names?.[0] ?? app.name, verified };
+  if (app.pluginName) return { type: resolveDeckyHubInstallType(release.tag, app.installedVersion ?? ""), name: app.pluginName };
+  if (!app.installedVersion && app.detect?.type === "decky-plugin") return { type: PLUGIN_INSTALL_TYPE.INSTALL, name: app.detect.names?.[0] ?? app.name };
   return null;
-}
-
-export const unverifiedLabel = (t: TFunc, label: string, verified: boolean) => (verified ? label : t("appcard.unverified", { label }));
-
-export function selfUpdateStageKey(key: string | undefined): MessageKey {
-  switch ((key ?? "").split(".").pop()) {
-    case "start":
-      return "settings.selfUpdateStageStart";
-    case "download_zip":
-    case "increment_count":
-      return "settings.selfUpdateStageDownload";
-    case "open_zip":
-    case "parse_zip":
-      return "settings.selfUpdateStageVerify";
-    case "uninstalling_previous":
-      return "settings.selfUpdateStageRemove";
-    case "installing_plugin":
-      return "settings.selfUpdateStageInstall";
-    default:
-      return "settings.selfUpdateStageWorking";
-  }
 }
 
 function isUpdate(app: App, latest: string | null) {
@@ -378,7 +351,7 @@ function isUpdate(app: App, latest: string | null) {
 
 export function installTypeLabel(t: TFunc, type: number, version: string, updateLabel = t("settings.updateTo", { version })) {
   return type === PLUGIN_INSTALL_TYPE.INSTALL
-    ? t("appcard.install")
+    ? t("appcard.installVersion", { version })
     : type === PLUGIN_INSTALL_TYPE.REINSTALL
     ? t("settings.reinstallTo", { version })
     : type === PLUGIN_INSTALL_TYPE.DOWNGRADE
@@ -411,25 +384,33 @@ export function notifyUpdates(apps: App[]) {
 // release has been seen mid-array), so sort by published date here.
 type Release = { tag: string; prerelease: boolean; publishedAt: string | null; url: string; assets: Asset[] };
 
-async function fetchReleases(repo: string, force: boolean): Promise<Release[]> {
+// Lookups for the same repo that overlap share one request.
+const inFlight = new Map<string, Promise<Release[]>>();
+
+function fetchReleases(repo: string, force: boolean): Promise<Release[]> {
+  const key = `${repo}:${force}`;
+  let request = inFlight.get(key);
+  if (!request) {
+    request = requestReleases(repo, force).finally(() => inFlight.delete(key));
+    inFlight.set(key, request);
+  }
+  return request;
+}
+
+async function requestReleases(repo: string, force: boolean): Promise<Release[]> {
   const cacheKey = `deckyhub-releases:${repo}`;
   const cached = readCache<Release[]>(cacheKey);
   if (cached && !force && Date.now() - cached.at < CACHE_TTL) return cached.data;
-  let response: Response;
+  let body: unknown;
   try {
-    // A 304 answer to If-None-Match doesn't count against GitHub's rate limit.
-    response = await githubFetch(`https://api.github.com/repos/${repo}/releases?per_page=20`, cached?.etag ? { "If-None-Match": cached.etag } : {});
-    if (response.status === 304 && cached) {
-      writeCache(cacheKey, cached.data, cached.etag);
-      return cached.data;
-    }
+    const response = await githubFetch(`https://api.github.com/repos/${repo}/releases?per_page=20`);
     if (!response.ok) throw await githubResponseError(response);
+    body = await response.json();
   } catch (error) {
     // Older releases beat an error card; a rate limit still raises the banner.
     if (cached) return cached.data;
     throw error;
   }
-  const body = await response.json();
   const releases: Release[] = (Array.isArray(body) ? body : [])
     .filter((item: any) => !item.draft)
     .map((item: any) => ({
@@ -440,47 +421,42 @@ async function fetchReleases(repo: string, force: boolean): Promise<Release[]> {
       assets: (item.assets || []).map((asset: any) => ({ name: String(asset.name || ""), url: asset.browser_download_url, size: asset.size || 0, sha256: String(asset.digest || "").replace(/^sha256:/, "") || undefined })),
     }))
     .sort((a: Release, b: Release) => (Date.parse(b.publishedAt || "") || 0) - (Date.parse(a.publishedAt || "") || 0));
-  writeCache(cacheKey, releases, response.headers.get("etag"));
+  writeCache(cacheKey, releases);
   return releases;
+}
+
+// A failed lookup becomes an empty list plus the error, for the caller to show.
+function listOrError<T>(items: Promise<T[]>): Promise<{ items: T[]; error?: string }> {
+  return items.then((items) => ({ items }), (error) => {
+    log(`Release lookup failed: ${error}`);
+    return { items: [], error: String(error) };
+  });
 }
 
 // DeckyHub's own recent releases (both channels) for its update window's
 // version picker, each with its DeckyHub-*.zip only when it carries a SHA-256
 // — Decky Loader's installer needs one to verify the download.
-export async function listDeckyHubReleases(force = false): Promise<{ items: DeckyHubReleaseOption[]; error?: string }> {
-  try {
-    const items = (await fetchReleases("mazillka/deckyhub-plugin", force)).map(({ assets, ...release }) => ({
-      ...release,
-      version: release.tag,
-      asset: assets.find((asset) => /^DeckyHub-.*\.zip$/i.test(asset.name) && /^[0-9a-f]{64}$/i.test(asset.sha256 ?? "")),
-    }));
-    return { items };
-  } catch (error) {
-    log(`Release lookup failed: ${error}`);
-    return { items: [], error: String(error) };
-  }
+export function listDeckyHubReleases(force = false): Promise<{ items: DeckyHubReleaseOption[]; error?: string }> {
+  return listOrError(fetchReleases("mazillka/deckyhub-plugin", force).then((releases) => releases.map(({ assets, ...release }) => ({
+    ...release,
+    asset: assets.find((asset) => /^DeckyHub-.*\.zip$/i.test(asset.name) && /^[0-9a-f]{64}$/i.test(asset.sha256 ?? "")),
+  }))));
 }
 
 // Newest release on the given channel for the QAM "Update" button.
-export async function latestDeckyHubRelease(channel: UpdateChannel, force = false): Promise<DeckyHubRelease> {
-  const { items, error } = await listDeckyHubReleases(force);
-  const release = items.find((item) => item.prerelease === (channel === "prerelease"));
-  return release?.asset ? { version: release.version, asset: release.asset } : { error: error ?? tr("release.noChecksum") };
+export async function latestDeckyHubRelease(channel: UpdateChannel): Promise<DeckyHubRelease> {
+  const { items, error } = await listDeckyHubReleases();
+  const release = items.find((item) => inChannel(item, channel));
+  return release?.asset ? { version: release.tag, asset: release.asset } : { error: error ?? tr("release.noChecksum") };
 }
 
 // A tracked app's recent releases (tag-filtered, assets matched to its
 // filters) for its version picker in AppDetailsModal.
-export async function listAppReleases(app: App, preference?: RepoPreference, force = false): Promise<{ items: AppReleaseOption[]; error?: string }> {
-  try {
-    const tagInclude = app.releaseTagInclude?.toLowerCase();
-    const items = (await fetchReleases(app.repo, force))
-      .filter((release) => !tagInclude || release.tag.toLowerCase().includes(tagInclude))
-      .map((release) => ({ ...release, version: release.tag, assets: matchingAssets(app, release.assets, preference?.assetFilter) }));
-    return { items };
-  } catch (error) {
-    log(`Release lookup failed: ${error}`);
-    return { items: [], error: String(error) };
-  }
+export function listAppReleases(app: App, preference?: RepoPreference, force = false): Promise<{ items: AppReleaseOption[]; error?: string }> {
+  const tagInclude = app.releaseTagInclude?.toLowerCase();
+  return listOrError(fetchReleases(app.repo, force).then((releases) => releases
+    .filter((release) => !tagInclude || release.tag.toLowerCase().includes(tagInclude))
+    .map((release) => ({ ...release, assets: matchingAssets(app, release.assets, preference?.assetFilter) }))));
 }
 
 // Fills in a card's latest release for its channel and whether it's newer
@@ -488,7 +464,7 @@ export async function listAppReleases(app: App, preference?: RepoPreference, for
 export async function hydrate(app: App, force: boolean, preference?: RepoPreference): Promise<App> {
   const channel: UpdateChannel = preference?.channel ?? "stable";
   const { items, error } = await listAppReleases(app, preference, force);
-  const release = items.find((item) => item.prerelease === (channel === "prerelease"));
+  const release = items.find((item) => inChannel(item, channel));
   if (!release) return { ...app, channel, error: error ?? tr("release.noMatch") };
   return {
     ...app,
