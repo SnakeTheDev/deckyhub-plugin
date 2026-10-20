@@ -1,15 +1,17 @@
 import { toaster } from "@decky/api";
 import { DialogButtonPrimary as Button, Dropdown, Focusable, Navigation, PanelSection, PanelSectionRow, Spinner, TextField } from "@decky/ui";
 import { useEffect, useRef, useState } from "react";
-import { FaArrowCircleUp, FaArrowLeft, FaArrowRight, FaCog, FaFileExport, FaListUl, FaSearch, FaSync } from "react-icons/fa";
+import { FaArrowCircleUp, FaCog, FaFileExport, FaListUl, FaSearch, FaSync, FaTimes, FaArrowUp } from "react-icons/fa";
 import { downloadAsset, exportLogs, getApps, getSettings, REGISTRY_UPDATED } from "../api";
 import { useT } from "../i18n";
 import type { App, Asset, HideableButton, RepoPreference, UpdateChannel, View } from "../types";
-import { compactButtonStyle, DEFAULT_COLUMNS_PER_ROW, getDeckyBackend, hydrate, log, notifyUpdates, sectionDividerStyle } from "../utils";
+import { compactButtonStyle, DEFAULT_COLUMNS_PER_ROW, getDeckyBackend, hydrate, installAction, log, needsFreshInstall, notifyUpdates, PLUGIN_INSTALL_TYPE, sectionDividerStyle, updateDeckyPlugins } from "../utils";
 import { AppCard } from "../components/AppCard";
 import { CleanupSection } from "../components/CleanupSection";
 import { showDownloadModal } from "../components/DownloadProgress";
 import { FocusableGrid } from "../components/FocusableGrid";
+import { KeepInView, keepInView } from "../components/KeepInView";
+import { Pager } from "../components/Pager";
 import { RateLimitBanner } from "../components/RateLimitBanner";
 import { DeckyHubUpdate } from "../components/DeckyHubUpdate";
 
@@ -17,6 +19,8 @@ import { DeckyHubUpdate } from "../components/DeckyHubUpdate";
 // big enough to trip GitHub's secondary (burst) rate limit.
 const RELEASE_CONCURRENCY = 8;
 const CARDS_PER_PAGE = 20;
+
+const NAV_LINKS = [["updates", FaArrowCircleUp], ["discover", FaSearch], ["repositories", FaListUl], ["settings", FaCog]] as const;
 
 const countBadgeStyle = { minWidth: "1.5em", padding: "0 6px", borderRadius: 999, background: "#f0c33c", color: "#1a1a1a", fontSize: "0.8em", fontWeight: 700, lineHeight: "1.5em", textAlign: "center" as const };
 
@@ -33,12 +37,14 @@ export function Content({ fullPage }: { fullPage?: View }) {
   const [columnsPerRow, setColumnsPerRow] = useState(DEFAULT_COLUMNS_PER_ROW);
   const [repoPreferences, setRepoPreferences] = useState<Record<string, RepoPreference>>({});
   const [hiddenButtons, setHiddenButtons] = useState<HideableButton[]>([]);
+  const [updatingAll, setUpdatingAll] = useState(false);
+  // Release checks finished out of the current load, shown while Updates waits on them.
+  const [checked, setChecked] = useState(0);
   const quickAccessRef = useRef<HTMLDivElement>(null);
 
-  const viewInfo: Record<View, { title: string; description: string; empty: string }> = {
-    updates: { title: t("nav.updates"), description: t("view.updatesDescription"), empty: t("view.updatesEmpty") },
-    discover: { title: t("nav.discover"), description: t("view.discoverDescription"), empty: t("view.discoverEmpty") },
-  };
+  const info = view === "updates"
+    ? { title: t("nav.updates"), description: t("view.updatesDescription"), empty: t("view.updatesEmpty") }
+    : { title: t("nav.discover"), description: t("view.discoverDescription"), empty: t("view.discoverEmpty") };
 
   // Bumped per load() so a slower, older load can't overwrite a newer one.
   const loadRun = useRef(0);
@@ -62,13 +68,16 @@ export function Content({ fullPage }: { fullPage?: View }) {
       if (view === "discover") setLoading(false);
       const hydrated = [...tracked];
       let next = 0;
+      setChecked(0);
       // A rolling pool: each finished request starts the next, rather than
       // waiting for the slowest one in a fixed batch.
       const worker = async () => {
         while (next < tracked.length) {
           const index = next++;
           hydrated[index] = await hydrate(tracked[index], force, preferences[tracked[index].repo]);
-          if (run === loadRun.current) setApps((current) => current.map((app) => (app.id === hydrated[index].id ? hydrated[index] : app)));
+          if (run !== loadRun.current) continue;
+          setApps((current) => current.map((app) => (app.id === hydrated[index].id ? hydrated[index] : app)));
+          setChecked((count) => count + 1);
         }
       };
       await Promise.all(Array.from({ length: Math.min(RELEASE_CONCURRENCY, tracked.length) }, worker));
@@ -96,13 +105,21 @@ export function Content({ fullPage }: { fullPage?: View }) {
   }, []);
 
   // Decky Loader reports when an install it ran finishes; reload so the card
-  // picks up the new installed version (release data stays cached).
+  // picks up the new installed version (release data stays cached). Debounced
+  // so an "Update all" batch reloads once, not once per plugin.
   useEffect(() => {
     const backend = getDeckyBackend();
     if (!backend) return;
-    const onFinish = () => void load();
+    let timer = 0;
+    const onFinish = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => void load(), 1000);
+    };
     backend.addEventListener("loader/plugin_download_finish", onFinish);
-    return () => backend.removeEventListener("loader/plugin_download_finish", onFinish);
+    return () => {
+      window.clearTimeout(timer);
+      backend.removeEventListener("loader/plugin_download_finish", onFinish);
+    };
   }, []);
 
   useEffect(() => {
@@ -118,9 +135,8 @@ export function Content({ fullPage }: { fullPage?: View }) {
       if (!result.jobId) return;
       setDownloading(true);
       await new Promise<void>((resolve) =>
-        showDownloadModal(t, result.jobId!, { state: "queued", filename: asset.name, total: asset.size }, (state) => {
+        showDownloadModal(t, result.jobId!, { state: "queued", filename: asset.name, total: asset.size }, () => {
           setDownloading(false);
-          if (state.state === "error") toaster.toast({ title: t("dl.failedTitle"), body: state.error || t("dl.failedNoReason") });
           resolve();
         }),
       );
@@ -142,7 +158,7 @@ export function Content({ fullPage }: { fullPage?: View }) {
       <PanelSectionRow>
         <Focusable flow-children="right" style={{ display: "flex", gap: 12 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <TextField label={t("filter.search")} value={query} onChange={(event) => { setQuery(event.currentTarget.value); setCardPage(0); }} />
+            <TextField label={t("filter.search")} value={query} bShowClearAction onChange={(event) => { setQuery(event.currentTarget.value); setCardPage(0); }} />
           </div>
           <div style={{ flex: "0 0 220px" }}>
             <div style={{ fontSize: "0.85em" }}>
@@ -165,55 +181,80 @@ export function Content({ fullPage }: { fullPage?: View }) {
     </PanelSection>
   );
 
-  const list = (filter: (app: App) => boolean, info: (typeof viewInfo)[View]) => {
-    const visibleApps = apps.filter(
-      (app) =>
-        filter(app) &&
-        (view !== "discover" ||
-          ((!query || `${app.name} ${app.repo}`.toLowerCase().includes(query.toLowerCase())) &&
-            (installedFilter === "All" || (installedFilter === "Installed") === Boolean(app.installedVersion))))
-    );
-    const pageCount = Math.max(1, Math.ceil(visibleApps.length / CARDS_PER_PAGE));
-    const currentPage = Math.min(cardPage, pageCount - 1);
-    const displayedApps = visibleApps.slice(currentPage * CARDS_PER_PAGE, (currentPage + 1) * CARDS_PER_PAGE);
-    return (
+  const visibleApps = apps.filter((app) =>
+    view === "updates"
+      ? app.updateAvailable === true
+      : (!query || `${app.name} ${app.repo} ${app.category} ${app.description ?? ""}`.toLowerCase().includes(query.toLowerCase())) &&
+        (installedFilter === "All" || (installedFilter === "Installed") === Boolean(app.installedVersion)),
+  );
+  // Decky plugins the Updates page can update in one batch (see updateDeckyPlugins).
+  const batchUpdates = view === "updates" && !hiddenButtons.includes("update")
+    ? visibleApps.flatMap((app) => {
+        const action = app.latestVersion ? installAction(app, { tag: app.latestVersion, assets: app.assets }) : null;
+        return app.updateAvailable === true && action?.type === PLUGIN_INSTALL_TYPE.UPDATE && !needsFreshInstall(action.name, action.type) ? [{ asset: app.assets[0], name: action.name, version: app.latestVersion! }] : [];
+      })
+    : [];
+  // Decky's own dialog takes over, so leave the page once the request is sent.
+  const updateAll = () => {
+    setUpdatingAll(true);
+    void updateDeckyPlugins(batchUpdates)
+      .catch((error: unknown) => toaster.toast({ title: "DeckyHub", body: String(error) }))
+      .finally(() => setUpdatingAll(false));
+    Navigation.NavigateBack();
+  };
+  const pageCount = Math.max(1, Math.ceil(visibleApps.length / CARDS_PER_PAGE));
+  const currentPage = Math.min(cardPage, pageCount - 1);
+  const displayedApps = visibleApps.slice(currentPage * CARDS_PER_PAGE, (currentPage + 1) * CARDS_PER_PAGE);
+  const page = (
       <>
-      {discoverFilters}
-      {discoverFilters && <div aria-hidden style={sectionDividerStyle} />}
       {loading && (
         <PanelSection>
           <PanelSectionRow>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, minHeight: "50vh" }}>
               <Spinner style={{ width: "1.1em" }} /> {t("content.loading")}
+              {apps.length > 0 && ` ${checked}/${apps.length}`}
             </div>
           </PanelSectionRow>
         </PanelSection>
       )}
       {loadError && (
-        <PanelSection title={t("content.loadErrorTitle")}>
-          <PanelSectionRow>{loadError}</PanelSectionRow>
-          <PanelSectionRow>
-            <Button style={compactButtonStyle} onClick={() => void load(true)}>
-              <FaSync /> {t("content.tryAgain")}
-            </Button>
-          </PanelSectionRow>
-        </PanelSection>
+        <KeepInView>
+          <PanelSection title={t("content.loadErrorTitle")}>
+            <PanelSectionRow>{loadError}</PanelSectionRow>
+            <PanelSectionRow>
+              <Button style={compactButtonStyle} onClick={() => void load(true)}>
+                <FaSync /> {t("content.tryAgain")}
+              </Button>
+            </PanelSectionRow>
+          </PanelSection>
+        </KeepInView>
       )}
       {!loading && !loadError && (
         <>
-          <PanelSection title={info.title}>
-            <PanelSectionRow>
-              <Focusable flow-children="right" style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                {info.description && <div style={{ flex: 1, minWidth: 0 }}>{info.description}</div>}
-                <div style={{ flex: info.description ? "0 0 180px" : 1 }}>
-                  <Button style={compactButtonStyle} onClick={() => void load(true)}>
-                    <FaSync /> {t("content.refresh")}
-                  </Button>
-                </div>
-              </Focusable>
-            </PanelSectionRow>
-          </PanelSection>
+          <KeepInView>
+            <PanelSection title={info.title}>
+              <PanelSectionRow>
+                <Focusable flow-children="right" style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>{info.description}</div>
+                  <div style={{ flex: "0 0 180px" }}>
+                    <Button style={compactButtonStyle} onClick={() => void load(true)}>
+                      <FaSync /> {t("content.refresh")}
+                    </Button>
+                  </div>
+                  {batchUpdates.length > 1 && (
+                    <div style={{ flex: 1 }}>
+                      <Button style={compactButtonStyle} disabled={updatingAll} onClick={updateAll}>
+                        <FaArrowUp /> {t("content.updateAll", { count: batchUpdates.length })}
+                      </Button>
+                    </div>
+                  )}
+                </Focusable>
+              </PanelSectionRow>
+            </PanelSection>
+          </KeepInView>
           <div aria-hidden style={sectionDividerStyle} />
+          {discoverFilters}
+          {discoverFilters && <div aria-hidden style={sectionDividerStyle} />}
           <FocusableGrid
             items={displayedApps}
             columns={fullPage ? columnsPerRow : 1}
@@ -234,78 +275,69 @@ export function Content({ fullPage }: { fullPage?: View }) {
           {visibleApps.length > CARDS_PER_PAGE && (
             <PanelSection>
               <PanelSectionRow>
-                <Focusable flow-children="right" style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                  <div style={{ flex: 1 }}>
-                    <Button style={compactButtonStyle} disabled={currentPage === 0} onClick={() => setCardPage((current) => current - 1)}>
-                      <FaArrowLeft /> {t("repos.previous")}
-                    </Button>
-                  </div>
-                  <span style={{ whiteSpace: "nowrap" }}>{t("repos.pageOf", { page: currentPage + 1, total: pageCount })}</span>
-                  <div style={{ flex: 1 }}>
-                    <Button style={compactButtonStyle} disabled={currentPage + 1 === pageCount} onClick={() => setCardPage((current) => current + 1)}>
-                      {t("repos.next")} <FaArrowRight />
-                    </Button>
-                  </div>
-                </Focusable>
+                <Pager page={currentPage} total={pageCount} onChange={setCardPage} />
               </PanelSectionRow>
             </PanelSection>
           )}
           {!visibleApps.length && (
-            <PanelSection title={info.empty}>
-              <PanelSectionRow>{t("content.useDiscover")}</PanelSectionRow>
-            </PanelSection>
+            <div className="deckyhub-empty" onFocus={keepInView} style={{ textAlign: "center" }}>
+              {/* Decky's section title is a left-aligned flex row; center it too. */}
+              <style>{".deckyhub-empty div { text-align: center; justify-content: center; }"}</style>
+              <PanelSection title={info.empty}>
+                {view === "updates" ? (
+                  <PanelSectionRow>
+                    <Button style={compactButtonStyle} onClick={() => Navigation.Navigate("/deckyhub/discover")}>
+                      <FaSearch /> {t("nav.discover")}
+                    </Button>
+                  </PanelSectionRow>
+                ) : (query || installedFilter !== "All") && (
+                  <PanelSectionRow>
+                    <Button style={compactButtonStyle} onClick={() => { setQuery(""); setInstalledFilter("All"); }}>
+                      <FaTimes /> {t("repos.clear")}
+                    </Button>
+                  </PanelSectionRow>
+                )}
+              </PanelSection>
+            </div>
           )}
         </>
       )}
       </>
-    );
-  };
+  );
 
   // The Quick Access view loads installed apps the same way the Updates page does.
   const updateCount = apps.filter((app) => app.updateAvailable).length;
   const navigation = (
     <>
-      <PanelSection title={t("nav.browse")}>
-        <PanelSectionRow>
-          <Button style={compactButtonStyle} onClick={() => Navigation.Navigate("/deckyhub/updates")}>
-            <FaArrowCircleUp /> {t("nav.updates")}
-            {updateCount > 0 && <span style={countBadgeStyle}>{updateCount}</span>}
-          </Button>
-        </PanelSectionRow>
-        <PanelSectionRow>
-          <Button style={compactButtonStyle} onClick={() => Navigation.Navigate("/deckyhub/discover")}>
-            <FaSearch /> {t("nav.discover")}
-          </Button>
-        </PanelSectionRow>
-        <PanelSectionRow>
-          <Button style={compactButtonStyle} onClick={() => Navigation.Navigate("/deckyhub/repositories")}>
-            <FaListUl /> {t("nav.repositories")}
-          </Button>
-        </PanelSectionRow>
-        <PanelSectionRow>
-          <Button style={compactButtonStyle} onClick={() => Navigation.Navigate("/deckyhub/settings")}>
-            <FaCog /> {t("nav.settings")}
-          </Button>
-        </PanelSectionRow>
+      <PanelSection>
+        {NAV_LINKS.map(([page, Icon]) => (
+          <PanelSectionRow key={page}>
+            <Button style={compactButtonStyle} onClick={() => Navigation.Navigate(`/deckyhub/${page}`)}>
+              <Icon /> {t(`nav.${page}`)}
+              {page === "updates" && updateCount > 0 && <span style={countBadgeStyle}>{updateCount}</span>}
+            </Button>
+          </PanelSectionRow>
+        ))}
       </PanelSection>
       <div aria-hidden style={sectionDividerStyle} />
       <DeckyHubUpdate />
       <CleanupSection />
       <div aria-hidden style={sectionDividerStyle} />
-      <PanelSection title={t("settings.troubleshooting")}>
-        <PanelSectionRow>
-          <Button style={compactButtonStyle} onClick={() => void exportLogs().then(({ path }) => toaster.toast({ title: "DeckyHub", body: t("repos.exportedTo", { path }) }))}>
-            <FaFileExport /> {t("settings.exportLogs")}
-          </Button>
-        </PanelSectionRow>
-        <PanelSectionRow>
-          <div style={{ color: "#8fcef4", fontSize: "0.85em" }}>{t("settings.exportLogsNote")}</div>
-        </PanelSectionRow>
-      </PanelSection>
+      <KeepInView>
+        <PanelSection title={t("settings.troubleshooting")}>
+          <PanelSectionRow>
+            <Button style={compactButtonStyle} onClick={() => void exportLogs().then(({ path }) => toaster.toast({ title: "DeckyHub", body: t("repos.exportedTo", { path }) }), (error) => toaster.toast({ title: "DeckyHub", body: String(error) }))}>
+              <FaFileExport /> {t("settings.exportLogs")}
+            </Button>
+          </PanelSectionRow>
+          <PanelSectionRow>
+            <div style={{ color: "#8fcef4", fontSize: "0.85em" }}>{t("settings.exportLogsNote")}</div>
+          </PanelSectionRow>
+        </PanelSection>
+      </KeepInView>
     </>
   );
 
-  const page = view === "updates" ? list((app) => app.updateAvailable === true, viewInfo.updates) : list(() => true, viewInfo.discover);
   return fullPage ? (
     <>
       <RateLimitBanner />

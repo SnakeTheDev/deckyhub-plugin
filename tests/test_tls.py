@@ -1,8 +1,12 @@
+import logging
 import ssl
+import sys
+import types
 import unittest
 from unittest.mock import patch
 
-from backend import tls
+sys.modules.setdefault("decky", types.SimpleNamespace(logger=logging.getLogger("decky-test")))
+import main as tls  # noqa: E402 - verifying_ssl_context lives in main.py
 
 
 class VerifyingContextTests(unittest.TestCase):

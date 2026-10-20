@@ -5,31 +5,78 @@ import os
 import shutil
 import ssl
 import subprocess
-import sys
+import threading
 import time
 import re
 import zipfile
 from pathlib import Path
+from http.client import HTTPException
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.parse import urlsplit
+from urllib.request import HTTPRedirectHandler, HTTPSHandler, Request, build_opener
 
 import decky
 
-# Decky loads main.py with importlib; its plugin directory is not guaranteed to be on sys.path.
 PLUGIN_DIR = str(Path(__file__).resolve().parent)
-if PLUGIN_DIR not in sys.path:
-    sys.path.insert(0, PLUGIN_DIR)
-
-from backend.registry import MAX_CUSTOM_REGISTRIES, REMOTE_REGISTRY_URL, fetch_remote_registry, load_registry, parse_registry, validate_registry_url
-from backend.tls import verifying_ssl_context
-
 DEFAULT_DOWNLOAD_DIR = "/home/deck/Downloads"
 PLUGIN_DOWNLOAD_DIR = f"{DEFAULT_DOWNLOAD_DIR}/deckyhub"
-REPOSITORY_NAME = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+# owner/name, where neither part is only dots: the frontend puts this straight into
+# api.github.com/repos/<repo>/releases with the user's token, so "../.." must not pass.
+REPOSITORY_NAME = re.compile(r"(?!\.+/)[A-Za-z0-9_.-]+/(?!\.+$)[A-Za-z0-9_.-]+")
 HIDEABLE_BUTTONS = ("downloadZip", "install", "update", "releasePage")
-SUPPORTED_LANGUAGES = {"auto", "en", "uk", "es", "de", "fr", "ja", "zh"}
+SUPPORTED_LANGUAGES = {"auto", "en", "uk", "ru", "es", "de", "fr", "ja", "zh"}
 DEFAULT_COLUMNS_PER_ROW = 3
+ACTIVE_DOWNLOAD_STATES = ("queued", "downloading")
 REGISTRY_RETRY_DELAY = 1.5
+
+
+# GitHub's release URLs redirect to its asset CDN; never follow one off HTTPS.
+class _HttpsOnlyRedirects(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not newurl.startswith("https://"):
+            raise RuntimeError(f"Refused a redirect to a non-HTTPS URL: {newurl}")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+# Where the major Linux distributions keep their CA bundle. SteamOS is Arch-based
+# and uses the first one; the rest are here so the same plugin works elsewhere.
+CA_BUNDLE_PATHS = (
+    "/etc/ssl/cert.pem",
+    "/etc/ssl/certs/ca-certificates.crt",
+    "/etc/pki/tls/certs/ca-bundle.crt",
+    "/etc/ssl/ca-bundle.pem",
+)
+
+
+def verifying_ssl_context() -> ssl.SSLContext:
+    """A verifying SSL context, with the trust store pointed at a real CA bundle.
+
+    Decky Loader runs plugins under a PyInstaller-bundled Python whose OpenSSL was
+    compiled on a Debian-style system and looks for certificates under
+    /usr/lib/ssl. SteamOS is Arch-based, so that directory does not exist, the
+    default context ends up trusting nobody, and every fetch fails with
+    "CERTIFICATE_VERIFY_FAILED: unable to get local issuer certificate".
+
+    So: build the normal verifying context, and only when it came up with no
+    certificates at all, load a CA bundle from a known location. Verification
+    stays on - this fixes where the trusted roots are read from, not whether
+    they are checked. An expired, self-signed or hostname-mismatched certificate
+    still fails, exactly as before.
+    """
+    context = ssl.create_default_context()
+    if context.get_ca_certs():
+        return context
+    for path in CA_BUNDLE_PATHS:
+        try:
+            context.load_verify_locations(cafile=path)
+        except (OSError, ssl.SSLError):
+            continue
+        if context.get_ca_certs():
+            return context
+    return context
+
+
+_OPENER = build_opener(_HttpsOnlyRedirects, HTTPSHandler(context=verifying_ssl_context()))
 
 
 def _coerce_columns_per_row(value) -> int:
@@ -98,65 +145,195 @@ def _coerce_settings(settings: dict) -> dict:
     }
 
 
+def _coerce_repo_settings(values) -> dict:
+    values = values if isinstance(values, dict) else {}
+    asset_filter = values.get("assetFilter")
+    return {
+        "channel": "prerelease" if values.get("channel") == "prerelease" else "stable",
+        "assetFilter": [value for value in asset_filter if isinstance(value, str) and value.strip()][:10] if isinstance(asset_filter, list) else [],
+    }
+
+
+REQUIRED_FIELDS = {"id", "name", "repo", "category", "asset"}
+STRING_FIELDS = ("id", "name", "repo", "category")
+OPTIONAL_STRING_FIELDS = ("description", "releaseTagInclude", "versionStrategy", "source")
+
+
+def _string_list(value: object) -> bool:
+    return isinstance(value, list) and all(isinstance(item, str) for item in value)
+
+
+def _valid_app(app: object, allow_commands: bool) -> bool:
+    # The frontend renders and lowercases these fields as-is, so a wrong type in
+    # one entry would otherwise break the page for every app.
+    if not isinstance(app, dict) or not REQUIRED_FIELDS <= app.keys():
+        return False
+    if not all(isinstance(app[key], str) for key in STRING_FIELDS):
+        return False
+    if not all(isinstance(app.get(key, ""), str) for key in OPTIONAL_STRING_FIELDS):
+        return False
+    if not REPOSITORY_NAME.fullmatch(app["repo"]):
+        return False
+    asset = app["asset"]
+    if not isinstance(asset, dict) or not _string_list(asset.get("include")) or not _string_list(asset.get("exclude")):
+        return False
+    detect = app.get("detect", {})
+    if not isinstance(detect, dict):
+        return False
+    if not _string_list(detect.get("names", [])):
+        return False
+    # A "command" detect rule is run with subprocess by _installed_version, so only
+    # the bundled file (shipped and reviewed with the plugin) may use one. Anything
+    # downloaded - the live official list or a user-added one - can't run commands.
+    return allow_commands or "command" not in detect
+
+
+def parse_registry(payload: object, allow_commands: bool = False) -> list[dict]:
+    """Validate the portable registry format and ignore malformed records."""
+    if not isinstance(payload, dict) or payload.get("schemaVersion") != 1 or not isinstance(payload.get("apps"), list):
+        raise ValueError("Unsupported registry format")
+    return [app for app in payload["apps"] if _valid_app(app, allow_commands)]
+
+
+REMOTE_REGISTRY_URL = "https://raw.githubusercontent.com/mazillka/deckyhub-plugin/refs/heads/main/registry/apps.json"
+# Other spellings of the same file (the Manage page expands owner/repo to the HEAD
+# form), so the official list can't be re-added as a custom one that adds nothing.
+_OFFICIAL_RAW_PREFIX = "https://raw.githubusercontent.com/mazillka/deckyhub-plugin/"
+_OFFICIAL_REFS = ("refs/heads/main/", "main/", "HEAD/")
+
+
+def is_official_registry_url(url: str) -> bool:
+    lowered = url.casefold()
+    return any(lowered == (_OFFICIAL_RAW_PREFIX + ref + "registry/apps.json").casefold() for ref in _OFFICIAL_REFS)
+REMOTE_REGISTRY_TIMEOUT = 10
+MAX_REMOTE_REGISTRY_BYTES = 512 * 1024
+# How many user-added registries one install will track, so a bad list can't
+# turn startup into an unbounded sequence of network fetches.
+MAX_CUSTOM_REGISTRIES = 10
+
+
+def fetch_remote_registry(url: str = REMOTE_REGISTRY_URL, timeout: float = REMOTE_REGISTRY_TIMEOUT) -> tuple[list[dict], str]:
+    """Download the registry over HTTPS. Returns (apps, raw_text); raises on any failure."""
+    if not url.startswith("https://"):
+        raise ValueError("Registry URL must use HTTPS")
+    request = Request(url, headers={"User-Agent": "DeckyHub"})
+    try:
+        with _OPENER.open(request, timeout=timeout) as response:
+            raw = response.read(MAX_REMOTE_REGISTRY_BYTES + 1)
+    except RuntimeError as error:
+        # _HttpsOnlyRedirects refused a redirect off HTTPS. A URLError (not ValueError),
+        # so the UI says "couldn't reach" rather than "not a registry".
+        raise URLError(str(error)) from error
+    except HTTPException as error:
+        # IncompleteRead and friends aren't OSError; report them as the network errors they are.
+        raise ConnectionError(f"{type(error).__name__}: {error}") from error
+    if len(raw) > MAX_REMOTE_REGISTRY_BYTES:
+        raise ValueError("Remote registry is too large")
+    text = raw.decode("utf-8")
+    return parse_registry(json.loads(text)), text
+
+
+def validate_registry_url(url: str) -> str:
+    """Normalize a registry URL the user typed; raise ValueError if it can't be used.
+
+    HTTPS only, and only paths that end in `.json`, so a mistyped URL fails with
+    a clear message here instead of an opaque JSON parse error at load time.
+    """
+    url = url.strip() if isinstance(url, str) else ""
+    if not url.startswith("https://"):
+        raise ValueError("Registry URL must use HTTPS")
+    if len(url) > 2048:
+        raise ValueError("Registry URL is too long")
+    if not urlsplit(url).path.lower().endswith(".json"):
+        raise ValueError("Registry URL must point to a .json file")
+    return url
+
 class Plugin:
     async def _main(self):
         self.settings_path = Path(decky.DECKY_PLUGIN_SETTINGS_DIR) / "settings.json"
         self.settings = self._load_settings()
-        self.apps = await asyncio.to_thread(self._load_registry)
+        # Start from the cached/bundled lists so startup never waits on the network,
+        # then refresh from GitHub in the background (see _refresh_registry_in_background).
+        self.apps = await asyncio.to_thread(self._load_registry, None, False)
         self.downloads: dict[str, dict] = {}
         self.cancelled: set[str] = set()
         self.download_queue: asyncio.Queue = asyncio.Queue()
         self.queue_worker = asyncio.create_task(self._run_download_queue())
+        self.registry_task = asyncio.create_task(self._refresh_registry_in_background())
         decky.logger.info("DeckyHub %s started", (await self.get_deckyhub_info())["version"])
 
     def _load_settings(self) -> dict:
         try:
             settings = json.loads(self.settings_path.read_text(encoding="utf-8"))
-            repos = settings.get("customRepos", [])
+            repos = settings.get("customRepos")
+            repo_settings = settings.get("repoSettings")
             return {
                 **_coerce_settings(settings),
-                "customRepos": [repo for repo in repos if isinstance(repo, str) and REPOSITORY_NAME.fullmatch(repo)],
+                "customRepos": [repo for repo in repos if isinstance(repo, str) and REPOSITORY_NAME.fullmatch(repo)] if isinstance(repos, list) else [],
                 "customRegistries": _coerce_registry_urls(settings.get("customRegistries", [])),
-                "repoSettings": settings.get("repoSettings", {}) if isinstance(settings.get("repoSettings"), dict) else {},
+                "repoSettings": {repo: _coerce_repo_settings(values) for repo, values in repo_settings.items() if REPOSITORY_NAME.fullmatch(repo)} if isinstance(repo_settings, dict) else {},
             }
         except (AttributeError, OSError, json.JSONDecodeError) as error:
             if self.settings_path.exists():
                 decky.logger.error("Can't read %s, using defaults: %s", self.settings_path, error)
             return {**_coerce_settings({}), "customRepos": [], "customRegistries": [], "repoSettings": {}}
 
-    def _load_registry(self, prefetched: dict[str, tuple[list[dict], str]] | None = None) -> list[dict]:
+    async def _refresh_registry_in_background(self):
+        try:
+            before = self.apps
+            await self.refresh_registry()
+            # Pages already open loaded the cached list; tell them to reload (index.tsx),
+            # but only on a real change - the reload resets their page and every card.
+            if self.apps != before:
+                await decky.emit("registry_updated")
+        except Exception as error:
+            decky.logger.error("Background registry refresh failed: %s", error)
+
+    def _load_registry(self, prefetched: dict[str, tuple[list[dict], str]] | None = None, network: bool = True) -> list[dict]:
         """Official registry first (GitHub -> cached copy -> bundled file), then any user-added ones.
 
         `prefetched` maps a URL to a payload already downloaded this call, so adding a
         registry reuses the fetch that validated it instead of asking for it twice.
+        `network=False` skips the downloads and reads only the caches and bundled file.
         """
         prefetched = prefetched or {}
-        apps = self._fetch_registry(REMOTE_REGISTRY_URL, bundled=True, prefetched=prefetched.get(REMOTE_REGISTRY_URL))
+        apps = self._fetch_registry(REMOTE_REGISTRY_URL, bundled=True, prefetched=prefetched.get(REMOTE_REGISTRY_URL), network=network)
         # First source wins: a user-added registry can add apps but never override
-        # the detect rules or asset filters of an entry from the official registry.
+        # the detect rules or asset filters of an entry from the official registry,
+        # nor reuse its id (the frontend matches cards by id).
         seen = {app["repo"].casefold() for app in apps}
-        for url in self.settings.get("customRegistries", []):
-            for app in self._fetch_registry(url, prefetched=prefetched.get(url)):
-                if app["repo"].casefold() not in seen:
+        seen_ids = {app["id"] for app in apps}
+        # A copy: add/remove can change the list while this runs in a worker thread.
+        for url in list(self.settings.get("customRegistries", [])):
+            for app in self._fetch_registry(url, prefetched=prefetched.get(url), network=network):
+                if app["repo"].casefold() not in seen and app["id"] not in seen_ids:
                     seen.add(app["repo"].casefold())
+                    seen_ids.add(app["id"])
                     apps.append(app)
         return apps
 
-    def _fetch_registry(self, url: str, bundled: bool = False, prefetched: tuple[list[dict], str] | None = None) -> list[dict]:
+    def _fetch_registry(self, url: str, bundled: bool = False, prefetched: tuple[list[dict], str] | None = None, network: bool = True) -> list[dict]:
         """One registry source: fetch it, cache it, else fall back to the cache and then the bundled file."""
         cache_path = self._registry_cache_path(url)
         if prefetched is not None:
             apps, text = prefetched
             self._cache_registry(cache_path, text, url)
             return apps
-        try:
-            apps, text = fetch_remote_registry(url)
-        except (OSError, ValueError) as error:
-            decky.logger.warning("Registry %s unavailable (%s); trying cached copy", url, error)
-        else:
-            self._cache_registry(cache_path, text, url)
-            decky.logger.info("Loaded %d repositories from %s", len(apps), url)
-            return apps
+        if network:
+            try:
+                apps, text = fetch_remote_registry(url)
+                # An empty official list is a broken publish, not "no apps": keep the
+                # last good cache (or the bundled file) rather than overwrite it.
+                if bundled and not apps:
+                    raise ValueError("Registry has no usable apps")
+            except (OSError, ValueError) as error:
+                decky.logger.warning("Registry %s unavailable (%s); trying cached copy", url, error)
+            else:
+                # Removed while this download was in flight: don't recreate its cache.
+                if bundled or url in self.settings.get("customRegistries", []):
+                    self._cache_registry(cache_path, text, url)
+                decky.logger.info("Loaded %d repositories from %s", len(apps), url)
+                return apps
         try:
             return parse_registry(json.loads(cache_path.read_text(encoding="utf-8")))
         except (OSError, ValueError):
@@ -164,13 +341,15 @@ class Plugin:
         if not bundled:
             return []
         decky.logger.warning("Using bundled registry")
-        return load_registry(decky.DECKY_PLUGIN_DIR)
+        return parse_registry(json.loads((Path(decky.DECKY_PLUGIN_DIR) / "registry" / "apps.json").read_text(encoding="utf-8")), allow_commands=True)
 
     def _cache_registry(self, cache_path: Path, text: str, url: str) -> None:
         """Best-effort: a registry that won't cache still works this session."""
         try:
             cache_path.parent.mkdir(parents=True, exist_ok=True)
-            cache_path.write_text(text, encoding="utf-8")
+            temp = cache_path.with_name(f"{cache_path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+            temp.write_text(text, encoding="utf-8")
+            os.replace(temp, cache_path)
         except OSError as error:
             decky.logger.warning("Could not cache registry %s: %s", url, error)
 
@@ -183,10 +362,17 @@ class Plugin:
         return directory / "registries" / f"{hashlib.sha256(url.encode('utf-8')).hexdigest()[:16]}.json"
 
     def _save_settings(self):
+        # Write-then-rename, so a Deck losing power mid-save keeps the old file.
         self.settings_path.parent.mkdir(parents=True, exist_ok=True)
-        self.settings_path.write_text(json.dumps(self.settings), encoding="utf-8")
+        temp = self.settings_path.with_name(self.settings_path.name + ".tmp")
+        with open(temp, "w", encoding="utf-8") as file:
+            json.dump(self.settings, file)
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(temp, self.settings_path)
 
-    def _scan_installed_plugins(self) -> list[tuple[Path, dict, str | None]]:
+    # Each plugin's (plugin.json, package.json or {}, repository), read once per scan.
+    def _scan_installed_plugins(self) -> list[tuple[dict, dict, str | None]]:
         plugins_dir = Path(decky.DECKY_HOME) / "plugins"
         scanned = []
         for manifest_path in plugins_dir.glob("*/plugin.json"):
@@ -194,7 +380,11 @@ class Plugin:
                 manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 continue
-            scanned.append((manifest_path, manifest, self._plugin_repository(manifest_path, manifest)))
+            try:
+                package = json.loads((manifest_path.parent / "package.json").read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                package = {}
+            scanned.append((manifest, package, self._plugin_repository(manifest, package)))
         return scanned
 
     def _installed_version(self, app: dict) -> str | None:
@@ -210,31 +400,21 @@ class Plugin:
             decky.logger.warning("Version check %s failed: %s", command, error)
             return "installed"
 
-    def _match_decky_plugin(self, rule: dict, installed_plugins: list[tuple[Path, dict, str | None]]) -> tuple[Path, dict] | None:
+    def _match_decky_plugin(self, rule: dict, installed_plugins: list[tuple[dict, dict, str | None]]) -> tuple[dict, dict] | None:
         names = {name.casefold() for name in rule.get("names", [])}
         expected_repo = str(rule.get("repo", "")).casefold()
-        for manifest_path, manifest, repo in installed_plugins:
+        for manifest, package, repo in installed_plugins:
             if manifest.get("name", "").casefold() in names or (expected_repo and repo == expected_repo):
-                return manifest_path, manifest
+                return manifest, package
         return None
 
-    def _decky_plugin_version(self, match: tuple[Path, dict] | None) -> str | None:
+    def _decky_plugin_version(self, match: tuple[dict, dict] | None) -> str | None:
         if not match:
             return None
-        manifest_path, manifest = match
-        if manifest.get("version"):
-            return str(manifest["version"])
-        try:
-            package = json.loads((manifest_path.parent / "package.json").read_text(encoding="utf-8"))
-            return str(package.get("version") or "installed")
-        except (OSError, json.JSONDecodeError):
-            return "installed"
+        manifest, package = match
+        return str(manifest.get("version") or package.get("version") or "installed")
 
-    def _plugin_repository(self, manifest_path: Path, manifest: dict) -> str | None:
-        try:
-            package = json.loads((manifest_path.parent / "package.json").read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            package = {}
+    def _plugin_repository(self, manifest: dict, package: dict) -> str | None:
         value = package.get("repository", manifest.get("repository"))
         if isinstance(value, dict):
             value = value.get("url")
@@ -256,7 +436,7 @@ class Plugin:
             if app.get("detect", {}).get("type") == "decky-plugin":
                 match = self._match_decky_plugin(app["detect"], installed_plugins)
                 installed[index] = self._decky_plugin_version(match)
-                plugin_names[index] = match[1].get("name") if match else None
+                plugin_names[index] = match[0].get("name") if match else None
             else:
                 command_checks.append((index, app))
         command_versions = await asyncio.gather(*(asyncio.to_thread(self._installed_version, app) for _, app in command_checks))
@@ -269,10 +449,7 @@ class Plugin:
         if not REPOSITORY_NAME.fullmatch(repo):
             decky.logger.error("Refused settings for invalid repository %r", repo)
             raise ValueError("Repository must be owner/name")
-        item = {
-            "channel": "prerelease" if values.get("channel") == "prerelease" else "stable",
-            "assetFilter": [value for value in values.get("assetFilter", []) if isinstance(value, str) and value.strip()][:10],
-        }
+        item = _coerce_repo_settings(values)
         self.settings["repoSettings"][repo] = item
         self._save_settings()
         decky.logger.info("Saved settings for %s: %s", repo, item)
@@ -280,19 +457,16 @@ class Plugin:
 
     def _custom_apps(self) -> list[dict]:
         bundled = {app["repo"].casefold() for app in self.apps}
-        return [{"id": f"custom-{repo.replace('/', '-')}", "name": repo, "repo": repo, "category": "Custom", "versionStrategy": "semver", "source": "releases", "detect": {"type": "decky-plugin", "repo": repo}, "asset": {"include": [], "exclude": ["source"]}} for repo in self.settings["customRepos"] if repo.casefold() not in bundled]
+        return [{"id": f"custom-{repo.replace('/', '-')}", "name": repo, "repo": repo, "category": "Custom", "detect": {"type": "decky-plugin", "repo": repo}, "asset": {"include": [], "exclude": ["source"]}} for repo in self.settings["customRepos"] if repo.casefold() not in bundled]
 
     async def get_settings(self):
         return self.settings
 
     async def get_deckyhub_info(self):
-        for directory in (Path(getattr(decky, "DECKY_PLUGIN_DIR", PLUGIN_DIR)), Path(PLUGIN_DIR)):
-            try:
-                package = json.loads((directory / "package.json").read_text(encoding="utf-8"))
-                return {"version": str(package["version"])}
-            except (KeyError, OSError, json.JSONDecodeError):
-                pass
-        return {"version": "unknown"}
+        try:
+            return {"version": str(json.loads((Path(PLUGIN_DIR) / "package.json").read_text(encoding="utf-8"))["version"])}
+        except (KeyError, OSError, json.JSONDecodeError):
+            return {"version": "unknown"}
 
     async def save_settings(self, settings: dict):
         self.settings = {
@@ -307,12 +481,16 @@ class Plugin:
 
     async def clear_downloads(self):
         directory = Path(PLUGIN_DOWNLOAD_DIR)
+        # Files an active download is writing or about to write stay put.
+        active = {Path(path) for job in getattr(self, "downloads", {}).values() if job["state"] in ACTIVE_DOWNLOAD_STATES and job.get("path") for path in (job["path"], job["path"] + ".part")}
 
         def clear():
             if not directory.is_dir():
                 return 0
             removed = 0
             for entry in directory.iterdir():
+                if entry in active:
+                    continue
                 if entry.is_dir() and not entry.is_symlink():
                     shutil.rmtree(entry)
                 else:
@@ -348,7 +526,7 @@ class Plugin:
         return {"added": True, "repo": repo}
 
     async def get_custom_repos(self):
-        return {"repos": [{"repo": repo} for repo in self.settings["customRepos"]]}
+        return {"repos": self.settings["customRepos"]}
 
     async def remove_custom_repo(self, repo: str):
         repo = repo.strip()
@@ -362,12 +540,13 @@ class Plugin:
         decky.logger.info("Removed repository %s", stored)
         return {"removed": True, "repo": repo}
 
+    def _export_target(self, name: str) -> Path:
+        target = Path(DEFAULT_DOWNLOAD_DIR) / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        return self._next_name(target) if target.exists() else target
+
     async def export_custom_repos(self):
-        target_dir = Path(DEFAULT_DOWNLOAD_DIR)
-        target_dir.mkdir(parents=True, exist_ok=True)
-        target = target_dir / "DeckyHub-repositories.json"
-        if target.exists():
-            target = self._next_name(target)
+        target = self._export_target("DeckyHub-repositories.json")
         target.write_text(json.dumps({"schemaVersion": 1, "repos": self.settings["customRepos"]}, indent=2), encoding="utf-8")
         decky.logger.info("Exported %d repositories to %s", len(self.settings["customRepos"]), target)
         return {"path": str(target)}
@@ -378,11 +557,7 @@ class Plugin:
         decky.logger.warning("[frontend] %s", str(message)[:2000])
 
     async def export_logs(self):
-        target_dir = Path(DEFAULT_DOWNLOAD_DIR)
-        target_dir.mkdir(parents=True, exist_ok=True)
-        target = target_dir / "DeckyHub-logs.zip"
-        if target.exists():
-            target = self._next_name(target)
+        target = self._export_target(f"DeckyHub-logs-{time.strftime('%Y%m%d-%H%M%S')}.zip")
         with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:
             for log in sorted(Path(decky.DECKY_PLUGIN_LOG_DIR).glob("*.log")):
                 archive.write(log, log.name)
@@ -425,7 +600,7 @@ class Plugin:
         except ValueError as error:
             decky.logger.error("Refused to add invalid registry URL %r", url)
             return {"added": False, "url": url, "reason": "invalid-url", "detail": str(error)}
-        if url == REMOTE_REGISTRY_URL:
+        if is_official_registry_url(url):
             return {"added": False, "url": url, "reason": "official", "detail": ""}
         if url in self.settings.get("customRegistries", []):
             return {"added": False, "url": url, "reason": "already-added", "detail": ""}
@@ -439,13 +614,29 @@ class Plugin:
             reason, detail = _registry_failure_reason(error)
             decky.logger.error("Can't load registry %s: %s", url, error)
             return {"added": False, "url": url, "reason": reason, "detail": detail}
+        # Checked again: another add may have finished while this one was downloading.
+        if url in self.settings.get("customRegistries", []):
+            return {"added": False, "url": url, "reason": "already-added", "detail": ""}
+        if len(self.settings.get("customRegistries", [])) >= MAX_CUSTOM_REGISTRIES:
+            return {"added": False, "url": url, "reason": "too-many", "detail": str(MAX_CUSTOM_REGISTRIES)}
+        # A list whose every entry is already shown (the official one pinned to a
+        # commit, say) would be saved and fetched on every refresh for nothing.
+        repos = {app["repo"].casefold() for app in self.apps}
+        ids = {app["id"] for app in self.apps}
+        if not any(app["repo"].casefold() not in repos and app["id"] not in ids for app in apps):
+            return {"added": False, "url": url, "reason": "nothing-new", "detail": str(len(apps))}
         self.settings.setdefault("customRegistries", []).append(url)
         self._save_settings()
-        # Hand the payload we already have to the reload, so adding costs one request
-        # and leaves the new registry cached even if the reload hits a flaky network.
-        self.apps = await asyncio.to_thread(self._load_registry, {url: (apps, text)})
-        decky.logger.info("Added registry %s with %d repositories", url, len(apps))
-        return {"added": True, "url": url, "apps": len(apps)}
+        # Hand the payload we already have to the reload and read the rest from their
+        # caches, so adding costs exactly one request.
+        self.apps = await asyncio.to_thread(self._load_registry, {url: (apps, text)}, False)
+        # Report what it actually contributed: entries already listed by an earlier
+        # source are skipped, so "added with 12 repositories" could mean none showed up.
+        # The prefetched entries are passed through as-is, so identity tells them apart.
+        mine = {id(app) for app in apps}
+        added = sum(id(app) in mine for app in self.apps)
+        decky.logger.info("Added registry %s: %d entries, %d new", url, len(apps), added)
+        return {"added": True, "url": url, "apps": added}
 
     async def _fetch_registry_for_user(self, url: str) -> tuple[list[dict], str]:
         """Download one registry for an explicit user action, retrying once.
@@ -458,8 +649,9 @@ class Plugin:
         for attempt in range(2):
             try:
                 return await asyncio.to_thread(fetch_remote_registry, url)
-            except OSError:
-                if attempt:
+            except OSError as error:
+                # An HTTP status or a failed certificate check won't change on retry.
+                if attempt or isinstance(error, HTTPError) or isinstance(getattr(error, "reason", None), ssl.SSLCertVerificationError):
                     raise
                 decky.logger.info("Retrying registry %s after a network error", url)
                 await asyncio.sleep(REGISTRY_RETRY_DELAY)
@@ -471,12 +663,23 @@ class Plugin:
             return {"removed": False, "url": wanted}
         self.settings["customRegistries"].remove(stored)
         self._save_settings()
-        self.apps = await asyncio.to_thread(self._load_registry)
+        try:
+            self._registry_cache_path(stored).unlink(missing_ok=True)
+        except OSError as error:
+            decky.logger.warning("Could not delete cache for %s: %s", stored, error)
+        # Dropping a source needs no downloads: the rest come from their caches.
+        self.apps = await asyncio.to_thread(self._load_registry, None, False)
         decky.logger.info("Removed registry %s", stored)
         return {"removed": True, "url": stored}
 
     async def refresh_registry(self):
-        self.apps = await asyncio.to_thread(self._load_registry)
+        sources = list(self.settings.get("customRegistries", []))
+        apps = await asyncio.to_thread(self._load_registry)
+        if sources != self.settings.get("customRegistries", []):
+            # A registry was added or removed mid-download, so `apps` reflects the old
+            # list. Rebuild from the caches, which already hold what was just fetched.
+            apps = await asyncio.to_thread(self._load_registry, None, False)
+        self.apps = apps
         decky.logger.info("Reloaded %d registry entries", len(self.apps))
         return {"apps": len(self.apps)}
 
@@ -484,7 +687,7 @@ class Plugin:
         try:
             name = self._validate_download_asset(asset, repo)
             for job_id, job in self.downloads.items():
-                if job.get("repo") == repo and job.get("url") == asset["url"] and job["state"] in ("queued", "downloading"):
+                if job.get("repo") == repo and job.get("url") == asset["url"] and job["state"] in ACTIVE_DOWNLOAD_STATES:
                     return {"jobId": job_id}
             target_dir = Path(PLUGIN_DOWNLOAD_DIR)
             target_dir.mkdir(parents=True, exist_ok=True)
@@ -493,7 +696,7 @@ class Plugin:
                 target = self._next_name(target)
             # Finished jobs are only read by their own progress window, which stops
             # polling once it has seen the final state, so drop them here.
-            self.downloads = {key: job for key, job in self.downloads.items() if job["state"] in ("queued", "downloading")}
+            self.downloads = {key: job for key, job in self.downloads.items() if job["state"] in ACTIVE_DOWNLOAD_STATES}
             job_id = f"{name}-{time.monotonic_ns()}"
             self.downloads[job_id] = {"state": "queued", "filename": target.name, "received": 0, "total": asset.get("size") or 0, "path": str(target), "error": None, "repo": repo, "url": asset["url"]}
             self.download_queue.put_nowait((job_id, asset, target))
@@ -532,6 +735,8 @@ class Plugin:
     def _download(self, job_id: str, asset: dict, target: Path):
         job, temp = self.downloads[job_id], target.with_name(target.name + ".part")
         try:
+            if job_id in self.cancelled:
+                raise InterruptedError("Download cancelled")
             job["state"] = "downloading"
             try:
                 self._download_with_urllib(job_id, asset, temp)
@@ -557,7 +762,7 @@ class Plugin:
     def _download_with_urllib(self, job_id: str, asset: dict, temp: Path):
         job = self.downloads[job_id]
         request = Request(asset["url"], headers={"User-Agent": "DeckyHub/0.2"})
-        with urlopen(request, timeout=30, context=verifying_ssl_context()) as response, open(temp, "wb") as file:
+        with _OPENER.open(request, timeout=30) as response, open(temp, "wb") as file:
             job["total"] = int(response.headers.get("Content-Length") or job["total"] or 0)
             while chunk := response.read(64 * 1024):
                 if job_id in self.cancelled:
@@ -573,10 +778,15 @@ class Plugin:
         environment = os.environ.copy()
         environment.pop("LD_LIBRARY_PATH", None)
         environment.pop("LD_PRELOAD", None)
-        process = subprocess.Popen([curl, "--fail", "--location", "--silent", "--show-error", "--connect-timeout", "15", "--max-time", "300", "--output", str(temp), asset["url"]], stderr=subprocess.PIPE, text=True, env=environment)
+        process = subprocess.Popen([curl, "--fail", "--location", "--proto", "=https", "--proto-redir", "=https", "--silent", "--show-error", "--connect-timeout", "15", "--max-time", "300", "--output", str(temp), asset["url"]], stderr=subprocess.PIPE, text=True, env=environment)
         while process.poll() is None:
             if job_id in self.cancelled:
                 process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
                 raise InterruptedError("Download cancelled")
             job["received"] = temp.stat().st_size if temp.exists() else 0
             time.sleep(0.2)
@@ -585,15 +795,15 @@ class Plugin:
         job["received"] = temp.stat().st_size
 
     def _sha256(self, path: Path) -> str:
-        digest = hashlib.sha256()
         with open(path, "rb") as file:
-            for chunk in iter(lambda: file.read(1024 * 1024), b""):
-                digest.update(chunk)
-        return digest.hexdigest()
+            return hashlib.file_digest(file, "sha256").hexdigest()
 
     async def get_download(self, job_id: str):
         return self.downloads.get(job_id, {"state": "missing"})
 
     async def cancel_download(self, job_id: str):
+        # Only active jobs: a finished job's id would otherwise stay in the set.
+        if self.downloads.get(job_id, {}).get("state") not in ACTIVE_DOWNLOAD_STATES:
+            return {"ok": False}
         self.cancelled.add(job_id)
         return {"ok": True}

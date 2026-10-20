@@ -1,7 +1,8 @@
-import { definePlugin, routerHook } from "@decky/api";
+import { addEventListener, definePlugin, removeEventListener, routerHook } from "@decky/api";
 import { staticClasses } from "@decky/ui";
 import type { ReactNode } from "react";
 import { FaGithub } from "react-icons/fa";
+import { REGISTRY_UPDATED } from "./api";
 import { I18nProvider } from "./i18n";
 import { Content } from "./pages/Content";
 import { ManageRepositoriesPage } from "./pages/ManageRepositoriesPage";
@@ -28,7 +29,12 @@ const ROUTES: Record<string, () => ReactNode> = {
   "/deckyhub/repositories": () => <ManageRepositoriesPage />,
 };
 
+// The backend refreshes the registry in the background after startup; forward its
+// event to the window one the pages already reload on.
+const onRegistryUpdated = () => window.dispatchEvent(new Event(REGISTRY_UPDATED));
+
 export default definePlugin(() => {
+  addEventListener("registry_updated", onRegistryUpdated);
   for (const [path, page] of Object.entries(ROUTES)) {
     routerHook.addRoute(path, () => (
       <Motion>
@@ -51,6 +57,7 @@ export default definePlugin(() => {
     icon: <FaGithub />,
     onDismount() {
       Object.keys(ROUTES).forEach((path) => routerHook.removeRoute(path));
+      removeEventListener("registry_updated", onRegistryUpdated);
     },
   };
 });

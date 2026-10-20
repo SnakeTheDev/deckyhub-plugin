@@ -1,8 +1,13 @@
+import http.client
 import json
+import logging
+import sys
+import types
 import unittest
 from unittest import mock
 
-from backend import registry
+sys.modules.setdefault("decky", types.SimpleNamespace(logger=logging.getLogger("decky-test")))
+import main as registry  # noqa: E402 - fetch_remote_registry lives in main.py
 
 VALID = {
     "schemaVersion": 1,
@@ -34,20 +39,32 @@ class RemoteRegistryTests(unittest.TestCase):
 
     def test_parses_remote_payload(self):
         body = json.dumps(VALID).encode("utf-8")
-        with mock.patch.object(registry, "urlopen", return_value=FakeResponse(body)):
+        with mock.patch.object(registry._OPENER, "open", return_value=FakeResponse(body)):
             apps, text = registry.fetch_remote_registry("https://example.com/apps.json")
         self.assertEqual([app["repo"] for app in apps], ["owner/demo"])
         self.assertEqual(json.loads(text), VALID)
 
     def test_rejects_oversized_payload(self):
         body = b" " * (registry.MAX_REMOTE_REGISTRY_BYTES + 10)
-        with mock.patch.object(registry, "urlopen", return_value=FakeResponse(body)):
+        with mock.patch.object(registry._OPENER, "open", return_value=FakeResponse(body)):
             with self.assertRaises(ValueError):
                 registry.fetch_remote_registry("https://example.com/apps.json")
 
     def test_invalid_payload_is_rejected(self):
-        with mock.patch.object(registry, "urlopen", return_value=FakeResponse(b'{"schemaVersion": 2}')):
+        with mock.patch.object(registry._OPENER, "open", return_value=FakeResponse(b'{"schemaVersion": 2}')):
             with self.assertRaises(ValueError):
+                registry.fetch_remote_registry("https://example.com/apps.json")
+
+    def test_rejects_a_redirect_to_plain_http(self):
+        # _HttpsOnlyRedirects raises RuntimeError mid-open; the fetch reports it as a network error.
+        refused = RuntimeError("Refused a redirect to a non-HTTPS URL: http://example.com/apps.json")
+        with mock.patch.object(registry._OPENER, "open", side_effect=refused):
+            with self.assertRaises(registry.URLError):
+                registry.fetch_remote_registry("https://example.com/apps.json")
+
+    def test_a_truncated_response_is_a_network_error(self):
+        with mock.patch.object(registry._OPENER, "open", side_effect=http.client.IncompleteRead(b"{")):
+            with self.assertRaises(ConnectionError):
                 registry.fetch_remote_registry("https://example.com/apps.json")
 
 

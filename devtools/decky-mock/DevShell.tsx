@@ -105,6 +105,9 @@ export default function DevShell() {
           <button className="preview-route" onClick={() => showDownloadModal(previewText, "preview-job", { state: "complete", path: "/home/deck/Downloads/deckyhub/DeckyHub-v1.0.2-rc.4.zip" })}>
             Download complete modal
           </button>
+          <button className="preview-route" onClick={() => showDownloadModal(previewText, "preview-job", { state: "error", filename: "Decky-Framegen.zip", error: "HTTP Error 404: Not Found" })}>
+            Download failed modal
+          </button>
           <button className="preview-route" onClick={() => reportRateLimit(12)}>
             Rate limit banner
           </button>

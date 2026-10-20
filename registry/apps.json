@@ -7,8 +7,6 @@
       "description": "Boosts frame rates with Lossless Scaling frame generation.",
       "repo": "eugeniosegala/MAKO",
       "category": "Frame Generation",
-      "versionStrategy": "semver",
-      "source": "releases",
       "releaseTagInclude": "plugin-v",
       "detect": { "type": "decky-plugin", "names": ["MAKO - Frame Generation", "MAKO Decky"] },
       "asset": { "include": ["mako-decky", ".zip"], "exclude": ["source"] }
@@ -19,8 +17,6 @@
       "description": "Enables and tunes LSFG-VK frame generation for compatible games.",
       "repo": "xXJSONDeruloXx/decky-lsfg-vk",
       "category": "Frame Generation",
-      "versionStrategy": "semver",
-      "source": "releases",
       "detect": { "type": "decky-plugin", "names": ["Decky LSFG-VK"] },
       "asset": { "include": [".zip"], "exclude": ["source"] }
     },
@@ -30,8 +26,6 @@
       "description": "Launch and manage non-Steam game libraries.",
       "repo": "mubaraknumann/unifideck",
       "category": "Game Libraries",
-      "versionStrategy": "semver",
-      "source": "releases",
       "detect": { "type": "decky-plugin", "names": ["Unifideck"] },
       "asset": { "include": [".zip"], "exclude": ["source"] }
     },
@@ -41,8 +35,6 @@
       "description": "Controls Lossless Scaling frame generation for games.",
       "repo": "xXJSONDeruloXx/Decky-Framegen",
       "category": "Frame Generation",
-      "versionStrategy": "semver",
-      "source": "releases",
       "detect": { "type": "decky-plugin", "names": ["Decky-Framegen", "Decky Framegen"] },
       "asset": { "include": [".zip"], "exclude": ["source"] }
     },
@@ -52,8 +44,6 @@
       "description": "Browse and manage Nexus Mods from Gaming Mode.",
       "repo": "RedRanger14/decky-nexus",
       "category": "Mod Managers",
-      "versionStrategy": "semver",
-      "source": "releases",
       "detect": { "type": "decky-plugin", "names": ["Nexus Mods"] },
       "asset": { "include": [".zip"], "exclude": ["source"] }
     },
@@ -63,8 +53,6 @@
       "description": "Set Proton versions and launch options per game.",
       "repo": "moi952/decky-proton-launch",
       "category": "Launch Options",
-      "versionStrategy": "semver",
-      "source": "releases",
       "detect": { "type": "decky-plugin", "names": ["Decky Proton Launch"] },
       "asset": { "include": [".zip"], "exclude": ["source"] }
     },
@@ -74,8 +62,6 @@
       "description": "Create and apply reusable game launch options.",
       "repo": "Wurielle/decky-launch-options",
       "category": "Launch Options",
-      "versionStrategy": "semver",
-      "source": "releases",
       "detect": { "type": "decky-plugin", "names": ["Launch Options"] },
       "asset": { "include": [".zip"], "exclude": ["source"] }
     },
@@ -85,8 +71,6 @@
       "description": "Shows compatibility badges for non-Steam games.",
       "repo": "sebet/decky-nonsteam-badges",
       "category": "Game Libraries",
-      "versionStrategy": "semver",
-      "source": "releases",
       "detect": { "type": "decky-plugin", "names": ["Non-Steam Badges"] },
       "asset": { "include": [".zip"], "exclude": ["source"] }
     },
@@ -96,8 +80,6 @@
       "description": "Adjust CPU and GPU undervolting from Gaming Mode.",
       "repo": "totallynotbakadestroyer/Decky-Undervolt",
       "category": "Performance",
-      "versionStrategy": "semver",
-      "source": "releases",
       "detect": { "type": "decky-plugin", "names": ["Decky-Undervolt"] },
       "asset": { "include": [".zip"], "exclude": ["source"] }
     },
@@ -107,8 +89,6 @@
       "description": "Displays ProtonDB compatibility ratings in your library.",
       "repo": "bschelst/protondb-decky",
       "category": "Game Libraries",
-      "versionStrategy": "semver",
-      "source": "releases",
       "detect": { "type": "decky-plugin", "names": ["ProtonDB Badges"] },
       "asset": { "include": [".zip"], "exclude": ["source"] }
     },
@@ -118,8 +98,6 @@
       "description": "Applies custom themes and CSS to the Steam interface.",
       "repo": "DeckThemes/SDH-CssLoader",
       "category": "Customization",
-      "versionStrategy": "semver",
-      "source": "releases",
       "detect": { "type": "decky-plugin", "names": ["CSS Loader"] },
       "asset": { "include": [".zip"], "exclude": ["source"] }
     },
@@ -129,8 +107,6 @@
       "description": "Use your Steam Deck as a wireless Bluetooth controller for your Mac or iPad.",
       "repo": "jmedina21/deck-as-controller",
       "category": "Controllers",
-      "versionStrategy": "semver",
-      "source": "releases",
       "detect": { "type": "decky-plugin", "names": ["Deck as Controller"] },
       "asset": { "include": [".zip"], "exclude": ["source"] }
     },
@@ -140,9 +116,34 @@
       "description": "Controls Borderless Gaming BGFX effects and frame generation from Quick Access.",
       "repo": "andrewmd5/decky-bgfx",
       "category": "Frame Generation",
-      "versionStrategy": "semver",
-      "source": "releases",
       "detect": { "type": "decky-plugin", "names": ["BGFX"] },
+      "asset": { "include": [".zip"], "exclude": ["source"] }
+    },
+    {
+      "id": "themehub",
+      "name": "ThemeHub",
+      "description": "Console-style home screens and a theme hub for the Steam Deck.",
+      "repo": "Kaal31/benderthemes",
+      "category": "Customization",
+      "detect": { "type": "decky-plugin", "names": ["ThemeHub"] },
+      "asset": { "include": ["DeckHomeThemes", ".zip"], "exclude": ["source"] }
+    },
+    {
+      "id": "spindeck",
+      "name": "Spindeck",
+      "description": "Rotary-wheel game launcher for the home screen, spun with a trackpad circle.",
+      "repo": "justinca92/spindeck",
+      "category": "Customization",
+      "detect": { "type": "decky-plugin", "names": ["Spindeck"] },
+      "asset": { "include": [".zip"], "exclude": ["source"] }
+    },
+    {
+      "id": "game-glance",
+      "name": "Game Glance",
+      "description": "Immersive game page with full-screen art, HowLongToBeat times, descriptions and store info.",
+      "repo": "michpalm/game-glance",
+      "category": "Customization",
+      "detect": { "type": "decky-plugin", "names": ["Game Glance"] },
       "asset": { "include": [".zip"], "exclude": ["source"] }
     }
   ]
