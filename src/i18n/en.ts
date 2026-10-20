@@ -139,6 +139,7 @@ export const en = {
   "release.noChecksum": "No DeckyHub release ZIP with a SHA-256 checksum was found.",
   "error.loaderUnavailable": "Decky Loader is unavailable right now.",
   "toast.updatesAvailable": "Updates available: {count}",
+  "install.stalled": "Decky couldn't finish installing {name}. Reload Decky and try again.",
   "dl.failedTitle": "DeckyHub download failed",
   "dl.failedNoReason": "The download failed without a reported reason.",
   "dl.progress": "{percent}% · {received} of {total}",
