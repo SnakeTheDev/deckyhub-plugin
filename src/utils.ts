@@ -319,19 +319,38 @@ function traceDeckyInstall(pluginName: string) {
   if (!backend) return;
   const started = Date.now();
   const elapsed = () => `${((Date.now() - started) / 1000).toFixed(1)}s`;
+  let remoteTimer: ReturnType<typeof setTimeout> | null = null;
   const onStart = (name: string) => log(`Decky install start ${name} at ${elapsed()}`);
-  const onInfo = (progress: number, stage: string) => log(`Decky install ${pluginName} ${progress}% ${stage} at ${elapsed()}`);
+  const onInfo = (progress: number, stage: string) => {
+    log(`Decky install ${pluginName} ${progress}% ${stage} at ${elapsed()}`);
+    // Decky Loader can stall at 95% ("download_remote"): if a remote_binary
+    // download or hash check fails it never emits plugin_download_finish, so the
+    // progress dialog would sit there forever. Arm a short timer the moment that
+    // stage arrives; a finish cancels it, and otherwise we surface an actionable
+    // message instead of an endless 95%.
+    if (stage === "download_remote" || stage.includes("download_remote")) {
+      if (remoteTimer) window.clearTimeout(remoteTimer);
+      remoteTimer = window.setTimeout(() => {
+        log(`Decky install ${pluginName}: no finish after download_remote at ${elapsed()} - reloading Decky should clear it`);
+        toaster.toast({ title: "DeckyHub", body: tr("install.stalled", { name: pluginName }) });
+        stop();
+      }, 60 * 1000);
+    }
+  };
   const stop = () => {
     window.clearTimeout(timer);
+    if (remoteTimer) window.clearTimeout(remoteTimer);
+    remoteTimer = null;
     backend.removeEventListener("loader/plugin_download_start", onStart);
     backend.removeEventListener("loader/plugin_download_info", onInfo);
     backend.removeEventListener("loader/plugin_download_finish", onFinish);
   };
   const onFinish = (name: string) => {
     log(`Decky install finish ${name} at ${elapsed()}`);
+    if (remoteTimer) { window.clearTimeout(remoteTimer); remoteTimer = null; }
     if (name === pluginName) stop();
   };
-  // ponytail: fixed 10 min cap; Decky never sends finish after a silent failure.
+  // Backstop: Decky never sends finish after a silent failure.
   const timer = window.setTimeout(() => {
     log(`Decky install ${pluginName}: no finish after ${elapsed()} — check journalctl -u plugin_loader`);
     stop();

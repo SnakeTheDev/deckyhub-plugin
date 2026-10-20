@@ -168,6 +168,7 @@ export const es: Record<MessageKey, string> = {
   "release.noChecksum": "No se encontró un ZIP de DeckyHub con suma de comprobación SHA-256.",
   "error.loaderUnavailable": "Decky Loader no está disponible en este momento.",
   "toast.updatesAvailable": "Actualizaciones disponibles: {count}",
+  "install.stalled": "Decky couldn't finish installing {name}. Reload Decky and try again.",
   "dl.failedTitle": "Error en la descarga de DeckyHub",
   "dl.failedNoReason": "La descarga falló sin indicar el motivo.",
   "dl.progress": "{percent}% · {received} de {total}",

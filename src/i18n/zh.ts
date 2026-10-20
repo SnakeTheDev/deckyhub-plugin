@@ -168,6 +168,7 @@ export const zh: Record<MessageKey, string> = {
   "release.noChecksum": "未找到带 SHA-256 校验和的 DeckyHub 发布 ZIP。",
   "error.loaderUnavailable": "Decky Loader 当前不可用。",
   "toast.updatesAvailable": "可用更新：{count}",
+  "install.stalled": "Decky couldn't finish installing {name}. Reload Decky and try again.",
   "dl.failedTitle": "DeckyHub 下载失败",
   "dl.failedNoReason": "下载失败，未报告原因。",
   "dl.progress": "{percent}% · {received} / {total}",

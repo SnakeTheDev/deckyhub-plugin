@@ -168,6 +168,7 @@ export const uk: Record<MessageKey, string> = {
   "release.noChecksum": "Не знайдено ZIP-релізу DeckyHub з контрольною сумою SHA-256.",
   "error.loaderUnavailable": "Decky Loader зараз недоступний.",
   "toast.updatesAvailable": "Доступні оновлення: {count}",
+  "install.stalled": "Decky couldn't finish installing {name}. Reload Decky and try again.",
   "dl.failedTitle": "Не вдалося завантажити в DeckyHub",
   "dl.failedNoReason": "Завантаження не вдалося без зазначеної причини.",
   "dl.progress": "{percent}% · {received} з {total}",
