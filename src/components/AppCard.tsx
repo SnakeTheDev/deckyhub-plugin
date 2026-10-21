@@ -3,7 +3,8 @@ import { useState } from "react";
 import { FaArrowUp, FaCog, FaPlus } from "react-icons/fa";
 import { useT } from "../i18n";
 import type { App, Asset, HideableButton, RepoPreference, UpdateChannel } from "../types";
-import { compactButtonStyle, cardDescriptionStyle, displayVersion, installAction, PLUGIN_INSTALL_TYPE, statusKey, statusColor } from "../utils";
+import { compactButtonStyle, cardDescriptionStyle, installAction, PLUGIN_INSTALL_TYPE, statusKey, statusColor } from "../utils";
+import { displayVersion } from "../version";
 import { AppDetailsModal, startPluginInstall } from "./AppDetailsModal";
 
 export function AppCard({

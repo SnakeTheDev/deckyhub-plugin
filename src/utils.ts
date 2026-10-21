@@ -4,8 +4,6 @@ import { en, type MessageKey, type TFunc } from "./i18n/en";
 import type { App, AppReleaseOption, Asset, DeckyHubRelease, DeckyHubReleaseOption, RepoPreference, UpdateChannel } from "./types";
 import { compareVersions, displayVersion, inChannel, normalizeVersion } from "./version";
 
-export { displayVersion, inChannel, normalizeVersion };
-
 // GitHub's unauthenticated core API allows 60 requests/hour per IP, easy to
 // burn through when Discover/Updates check every tracked app. Release lists
 // are cached for 30 minutes (one shared entry per repo, see fetchReleases);

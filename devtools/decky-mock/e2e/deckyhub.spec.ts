@@ -1608,17 +1608,10 @@ test("Custom registries: add, reject, refresh and remove", async ({ page }) => {
   const app = mock(page);
   const add = app.getByRole("button", { name: "Add registry", exact: true });
   try {
-    await app.getByLabel("GitHub repository (owner/repo)").fill("../..");
-    await add.click();
-    await lastToast().toContain("isn't an owner/repo name");
-
-    await app.getByLabel("GitHub repository (owner/repo)").fill("mazillka/deckyhub-plugin");
-    await add.click();
-    await lastToast().toContain("DeckyHub's own registry");
-
-    await app.getByLabel("Add from").selectOption({ label: "Custom URL" });
-    const url = app.getByLabel("Registry URL (https://….json)");
+    // One field: "owner/repo" expands to a GitHub URL, anything else is sent as a URL.
+    const url = app.getByLabel("GitHub owner/repo or registry URL (https://….json)");
     for (const [value, message] of [
+      ["../..", "https:// URL ending in .json"],
       ["http://registry.test/good.json", "https:// URL ending in .json"],
       ["https://registry.test/missing.json", "Nothing at that URL"],
       ["https://registry.test/empty.json", "already listed"],
@@ -1632,7 +1625,7 @@ test("Custom registries: add, reject, refresh and remove", async ({ page }) => {
     await url.fill("https://registry.test/good.json");
     await add.click();
     await lastToast().toContain("Registry added with 1 repositories");
-    await expect(app.getByText("registry.test/good.json", { exact: true })).toBeVisible();
+    await expect(app.getByText("https://registry.test/good.json", { exact: true })).toBeVisible();
     const { result } = await bridgeCall(page, "get_apps");
     expect(result.apps.map((item: { repo: string }) => item.repo)).toContain("example/fixture-app");
 

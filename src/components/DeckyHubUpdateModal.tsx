@@ -5,7 +5,8 @@ import { FaDownload, FaFileArchive, FaTimes } from "react-icons/fa";
 import { downloadAsset, getSettings, saveSettings } from "../api";
 import type { TFunc } from "../i18n/en";
 import type { Asset, DeckyHubInfo, DeckyHubReleaseOption, UpdateChannel, HideableButton } from "../types";
-import { PLUGIN_INSTALL_TYPE, buildVersionOptions, getDeckyBackend, installDeckyPlugin, installTypeLabel, listDeckyHubReleases, modalButtonStyle, normalizeVersion, resolveDeckyHubInstallType, sectionDividerStyle, windowGap } from "../utils";
+import { PLUGIN_INSTALL_TYPE, buildVersionOptions, getDeckyBackend, installDeckyPlugin, installTypeLabel, listDeckyHubReleases, modalButtonStyle, resolveDeckyHubInstallType, sectionDividerStyle, windowGap } from "../utils";
+import { normalizeVersion } from "../version";
 import { showDownloadModal } from "./DownloadProgress";
 import { ReleaseActions, useReleasePicker, VersionPickerPanel } from "./VersionPickerPanel";
 

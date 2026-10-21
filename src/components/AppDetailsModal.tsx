@@ -5,7 +5,8 @@ import { FaArrowDown, FaArrowUp, FaFileArchive, FaPlus, FaRedo, FaTimes, FaTrash
 import { saveRepoSettings } from "../api";
 import type { TFunc } from "../i18n/en";
 import type { App, AppReleaseOption, Asset, HideableButton, RepoPreference, UpdateChannel } from "../types";
-import { buildVersionOptions, displayVersion, getDeckyBackend, installAction, installDeckyPlugin, installTypeLabel, listAppReleases, modalButtonStyle, needsFreshInstall, PLUGIN_INSTALL_TYPE, readableBytes, sectionDividerStyle, uninstallDeckyPlugin, windowGap } from "../utils";
+import { buildVersionOptions, getDeckyBackend, installAction, installDeckyPlugin, installTypeLabel, listAppReleases, modalButtonStyle, needsFreshInstall, PLUGIN_INSTALL_TYPE, readableBytes, sectionDividerStyle, uninstallDeckyPlugin, windowGap } from "../utils";
+import { displayVersion } from "../version";
 import { ReleaseActions, useReleasePicker, VersionPickerPanel } from "./VersionPickerPanel";
 
 // Hands one release to Decky Loader's installer, shared by this window and the

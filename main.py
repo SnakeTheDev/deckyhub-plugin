@@ -27,7 +27,6 @@ HIDEABLE_BUTTONS = ("downloadZip", "install", "update", "releasePage")
 SUPPORTED_LANGUAGES = {"auto", "en", "uk", "ru", "es", "de", "fr", "ja", "zh"}
 DEFAULT_COLUMNS_PER_ROW = 3
 ACTIVE_DOWNLOAD_STATES = ("queued", "downloading")
-REGISTRY_RETRY_DELAY = 1.5
 
 
 # GitHub's release URLs redirect to its asset CDN; never follow one off HTTPS.
@@ -163,7 +162,7 @@ def _string_list(value: object) -> bool:
     return isinstance(value, list) and all(isinstance(item, str) for item in value)
 
 
-def _valid_app(app: object, allow_commands: bool) -> bool:
+def _valid_app(app: object) -> bool:
     # The frontend renders and lowercases these fields as-is, so a wrong type in
     # one entry would otherwise break the page for every app.
     if not isinstance(app, dict) or not REQUIRED_FIELDS <= app.keys():
@@ -180,45 +179,30 @@ def _valid_app(app: object, allow_commands: bool) -> bool:
     detect = app.get("detect", {})
     if not isinstance(detect, dict):
         return False
-    if not _string_list(detect.get("names", [])):
-        return False
-    # A "command" detect rule is run with subprocess by _installed_version, so only
-    # the bundled file (shipped and reviewed with the plugin) may use one. Anything
-    # downloaded - the live official list or a user-added one - can't run commands.
-    return allow_commands or "command" not in detect
+    return _string_list(detect.get("names", []))
 
 
-def parse_registry(payload: object, allow_commands: bool = False) -> list[dict]:
+def parse_registry(payload: object) -> list[dict]:
     """Validate the portable registry format and ignore malformed records."""
     if not isinstance(payload, dict) or payload.get("schemaVersion") != 1 or not isinstance(payload.get("apps"), list):
         raise ValueError("Unsupported registry format")
-    return [app for app in payload["apps"] if _valid_app(app, allow_commands)]
+    return [app for app in payload["apps"] if _valid_app(app)]
 
 
 REMOTE_REGISTRY_URL = "https://raw.githubusercontent.com/mazillka/deckyhub-plugin/refs/heads/main/registry/apps.json"
-# Other spellings of the same file (the Manage page expands owner/repo to the HEAD
-# form), so the official list can't be re-added as a custom one that adds nothing.
-_OFFICIAL_RAW_PREFIX = "https://raw.githubusercontent.com/mazillka/deckyhub-plugin/"
-_OFFICIAL_REFS = ("refs/heads/main/", "main/", "HEAD/")
-
-
-def is_official_registry_url(url: str) -> bool:
-    lowered = url.casefold()
-    return any(lowered == (_OFFICIAL_RAW_PREFIX + ref + "registry/apps.json").casefold() for ref in _OFFICIAL_REFS)
-REMOTE_REGISTRY_TIMEOUT = 10
 MAX_REMOTE_REGISTRY_BYTES = 512 * 1024
 # How many user-added registries one install will track, so a bad list can't
 # turn startup into an unbounded sequence of network fetches.
 MAX_CUSTOM_REGISTRIES = 10
 
 
-def fetch_remote_registry(url: str = REMOTE_REGISTRY_URL, timeout: float = REMOTE_REGISTRY_TIMEOUT) -> tuple[list[dict], str]:
+def fetch_remote_registry(url: str) -> tuple[list[dict], str]:
     """Download the registry over HTTPS. Returns (apps, raw_text); raises on any failure."""
     if not url.startswith("https://"):
         raise ValueError("Registry URL must use HTTPS")
     request = Request(url, headers={"User-Agent": "DeckyHub"})
     try:
-        with _OPENER.open(request, timeout=timeout) as response:
+        with _OPENER.open(request, timeout=10) as response:
             raw = response.read(MAX_REMOTE_REGISTRY_BYTES + 1)
     except RuntimeError as error:
         # _HttpsOnlyRedirects refused a redirect off HTTPS. A URLError (not ValueError),
@@ -289,15 +273,17 @@ class Plugin:
         except Exception as error:
             decky.logger.error("Background registry refresh failed: %s", error)
 
-    def _load_registry(self, prefetched: dict[str, tuple[list[dict], str]] | None = None, network: bool = True) -> list[dict]:
+    def _load_registry(self, prefetched: tuple[str, tuple[list[dict], str]] | None = None, network: bool = True) -> list[dict]:
         """Official registry first (GitHub -> cached copy -> bundled file), then any user-added ones.
 
-        `prefetched` maps a URL to a payload already downloaded this call, so adding a
+        `prefetched` is a (url, payload) already downloaded this call, so adding a
         registry reuses the fetch that validated it instead of asking for it twice.
         `network=False` skips the downloads and reads only the caches and bundled file.
         """
-        prefetched = prefetched or {}
-        apps = self._fetch_registry(REMOTE_REGISTRY_URL, bundled=True, prefetched=prefetched.get(REMOTE_REGISTRY_URL), network=network)
+        def given(url):
+            return prefetched[1] if prefetched and prefetched[0] == url else None
+
+        apps = self._fetch_registry(REMOTE_REGISTRY_URL, bundled=True, prefetched=given(REMOTE_REGISTRY_URL), network=network)
         # First source wins: a user-added registry can add apps but never override
         # the detect rules or asset filters of an entry from the official registry,
         # nor reuse its id (the frontend matches cards by id).
@@ -305,7 +291,7 @@ class Plugin:
         seen_ids = {app["id"] for app in apps}
         # A copy: add/remove can change the list while this runs in a worker thread.
         for url in list(self.settings.get("customRegistries", [])):
-            for app in self._fetch_registry(url, prefetched=prefetched.get(url), network=network):
+            for app in self._fetch_registry(url, prefetched=given(url), network=network):
                 if app["repo"].casefold() not in seen and app["id"] not in seen_ids:
                     seen.add(app["repo"].casefold())
                     seen_ids.add(app["id"])
@@ -341,7 +327,7 @@ class Plugin:
         if not bundled:
             return []
         decky.logger.warning("Using bundled registry")
-        return parse_registry(json.loads((Path(decky.DECKY_PLUGIN_DIR) / "registry" / "apps.json").read_text(encoding="utf-8")), allow_commands=True)
+        return parse_registry(json.loads((Path(decky.DECKY_PLUGIN_DIR) / "registry" / "apps.json").read_text(encoding="utf-8")))
 
     def _cache_registry(self, cache_path: Path, text: str, url: str) -> None:
         """Best-effort: a registry that won't cache still works this session."""
@@ -387,19 +373,6 @@ class Plugin:
             scanned.append((manifest, package, self._plugin_repository(manifest, package)))
         return scanned
 
-    def _installed_version(self, app: dict) -> str | None:
-        rule = app.get("detect", {})
-        command = rule.get("command")
-        if not command or not shutil.which(command):
-            return None
-        try:
-            result = subprocess.run([command, *rule.get("args", ["--version"])], capture_output=True, text=True, timeout=4, check=False)
-            output = (result.stdout + result.stderr).strip()
-            return output[:200] or "installed"
-        except (OSError, subprocess.SubprocessError) as error:
-            decky.logger.warning("Version check %s failed: %s", command, error)
-            return "installed"
-
     def _match_decky_plugin(self, rule: dict, installed_plugins: list[tuple[dict, dict, str | None]]) -> tuple[dict, dict] | None:
         names = {name.casefold() for name in rule.get("names", [])}
         expected_repo = str(rule.get("repo", "")).casefold()
@@ -431,17 +404,11 @@ class Plugin:
         # The installed plugin's own name, which Decky Loader's install_plugin
         # route needs to update it in place (see "Install update" on the cards).
         plugin_names = [None] * len(apps)
-        command_checks = []
         for index, app in enumerate(apps):
             if app.get("detect", {}).get("type") == "decky-plugin":
                 match = self._match_decky_plugin(app["detect"], installed_plugins)
                 installed[index] = self._decky_plugin_version(match)
                 plugin_names[index] = match[0].get("name") if match else None
-            else:
-                command_checks.append((index, app))
-        command_versions = await asyncio.gather(*(asyncio.to_thread(self._installed_version, app) for _, app in command_checks))
-        for (index, _), version in zip(command_checks, command_versions):
-            installed[index] = version
         decky.logger.info("Listed %d apps, %d installed", len(apps), sum(version is not None for version in installed))
         return {"apps": [{**app, "installedVersion": version, "pluginName": name, "latestVersion": None, "publishedAt": None, "releaseUrl": None, "assets": [], "updateAvailable": None, "error": None} for app, version, name in zip(apps, installed, plugin_names)]}
 
@@ -600,8 +567,6 @@ class Plugin:
         except ValueError as error:
             decky.logger.error("Refused to add invalid registry URL %r", url)
             return {"added": False, "url": url, "reason": "invalid-url", "detail": str(error)}
-        if is_official_registry_url(url):
-            return {"added": False, "url": url, "reason": "official", "detail": ""}
         if url in self.settings.get("customRegistries", []):
             return {"added": False, "url": url, "reason": "already-added", "detail": ""}
         if len(self.settings.get("customRegistries", [])) >= MAX_CUSTOM_REGISTRIES:
@@ -609,7 +574,7 @@ class Plugin:
         # Load it once before saving, so a dead or non-registry URL is reported here,
         # while the user is watching, instead of being skipped on every later start.
         try:
-            apps, text = await self._fetch_registry_for_user(url)
+            apps, text = await asyncio.to_thread(fetch_remote_registry, url)
         except (OSError, ValueError) as error:
             reason, detail = _registry_failure_reason(error)
             decky.logger.error("Can't load registry %s: %s", url, error)
@@ -629,7 +594,7 @@ class Plugin:
         self._save_settings()
         # Hand the payload we already have to the reload and read the rest from their
         # caches, so adding costs exactly one request.
-        self.apps = await asyncio.to_thread(self._load_registry, {url: (apps, text)}, False)
+        self.apps = await asyncio.to_thread(self._load_registry, (url, (apps, text)), False)
         # Report what it actually contributed: entries already listed by an earlier
         # source are skipped, so "added with 12 repositories" could mean none showed up.
         # The prefetched entries are passed through as-is, so identity tells them apart.
@@ -637,24 +602,6 @@ class Plugin:
         added = sum(id(app) in mine for app in self.apps)
         decky.logger.info("Added registry %s: %d entries, %d new", url, len(apps), added)
         return {"added": True, "url": url, "apps": added}
-
-    async def _fetch_registry_for_user(self, url: str) -> tuple[list[dict], str]:
-        """Download one registry for an explicit user action, retrying once.
-
-        Connection resets and TLS handshake failures are usually transient, and
-        this only runs when someone is watching and waiting on the result, so a
-        single retry is cheap insurance. A ValueError means the bytes arrived but
-        aren't a registry, so retrying that would only waste the wait.
-        """
-        for attempt in range(2):
-            try:
-                return await asyncio.to_thread(fetch_remote_registry, url)
-            except OSError as error:
-                # An HTTP status or a failed certificate check won't change on retry.
-                if attempt or isinstance(error, HTTPError) or isinstance(getattr(error, "reason", None), ssl.SSLCertVerificationError):
-                    raise
-                decky.logger.info("Retrying registry %s after a network error", url)
-                await asyncio.sleep(REGISTRY_RETRY_DELAY)
 
     async def remove_custom_registry(self, url: str):
         wanted = url.strip() if isinstance(url, str) else ""

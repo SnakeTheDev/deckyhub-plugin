@@ -134,46 +134,6 @@ class CustomRegistryTests(unittest.TestCase):
             self.assertEqual([app["repo"] for app in plugin.apps], ["owner/official", "owner/custom"])
             self.assertEqual(plugin._load_settings()["customRegistries"], [CUSTOM_URL])
 
-    def test_add_retries_once_on_a_network_error(self):
-        with tempfile.TemporaryDirectory() as home, patch.object(main, "REGISTRY_RETRY_DELAY", 0):
-            plugin = self.plugin(home)
-            attempts = []
-
-            def flaky(url, *args, **kwargs):
-                if url == CUSTOM_URL:
-                    attempts.append(url)
-                    if len(attempts) == 1:
-                        raise URLError("TLS handshake failed")
-                return parse_registry(payload("owner/custom" if url == CUSTOM_URL else "owner/official")), json.dumps(payload("owner/custom" if url == CUSTOM_URL else "owner/official"))
-
-            with patch.object(main, "fetch_remote_registry", flaky):
-                result = asyncio.run(plugin.add_custom_registry(CUSTOM_URL))
-            self.assertTrue(result["added"])
-            self.assertEqual(len(attempts), 2)
-
-    def test_add_does_not_retry_a_malformed_registry(self):
-        # A ValueError means the bytes arrived and aren't a registry; retrying
-        # would just make the user wait twice as long for the same answer.
-        with tempfile.TemporaryDirectory() as home, patch.object(main, "REGISTRY_RETRY_DELAY", 0):
-            plugin = self.plugin(home)
-            attempts = []
-
-            def malformed(url, *args, **kwargs):
-                attempts.append(url)
-                raise ValueError("Unsupported registry format")
-
-            with patch.object(main, "fetch_remote_registry", malformed):
-                result = asyncio.run(plugin.add_custom_registry(CUSTOM_URL))
-            self.assertEqual(result["reason"], "not-registry")
-            self.assertEqual(len(attempts), 1)
-
-    def test_add_gives_up_after_two_failures(self):
-        with tempfile.TemporaryDirectory() as home, patch.object(main, "REGISTRY_RETRY_DELAY", 0):
-            plugin = self.plugin(home)
-            with patch.object(main, "fetch_remote_registry", fake_fetch({CUSTOM_URL: URLError("gone")})):
-                result = asyncio.run(plugin.add_custom_registry(CUSTOM_URL))
-            self.assertEqual((result["added"], result["reason"]), (False, "unreachable"))
-
     def test_add_maps_tls_failures_to_ssl_error(self):
         from urllib.error import URLError
         import ssl
@@ -257,14 +217,20 @@ class CustomRegistryTests(unittest.TestCase):
                 self.assertEqual((result["added"], result["reason"]), (False, "invalid-url"))
             self.assertEqual(plugin._load_settings()["customRegistries"], [])
 
-    def test_add_ignores_a_repeat_and_the_official_url(self):
+    def test_add_ignores_a_repeat(self):
         with tempfile.TemporaryDirectory() as home:
             plugin = self.plugin(home, [CUSTOM_URL])
-            with patch.object(main, "fetch_remote_registry", fake_fetch({REMOTE_REGISTRY_URL: payload()})):
-                self.assertEqual(asyncio.run(plugin.add_custom_registry(CUSTOM_URL))["reason"], "already-added")
-                official = asyncio.run(plugin.add_custom_registry(REMOTE_REGISTRY_URL))
-                self.assertEqual((official["added"], official["reason"]), (False, "official"))
+            self.assertEqual(asyncio.run(plugin.add_custom_registry(CUSTOM_URL))["reason"], "already-added")
             self.assertEqual(plugin._load_settings()["customRegistries"], [CUSTOM_URL])
+
+    def test_add_refuses_the_official_list_as_nothing_new(self):
+        # Any spelling of the official URL lists only what's already shown.
+        with tempfile.TemporaryDirectory() as home:
+            plugin = self.plugin(home)
+            plugin.apps = parse_registry(payload("owner/official"))
+            url = "https://raw.githubusercontent.com/mazillka/deckyhub-plugin/HEAD/registry/apps.json"
+            with patch.object(main, "fetch_remote_registry", fake_fetch({url: payload("owner/official")})):
+                self.assertEqual(asyncio.run(plugin.add_custom_registry(url))["reason"], "nothing-new")
 
     def test_add_stops_at_the_registr_cap(self):
         with tempfile.TemporaryDirectory() as home, patch.object(main, "MAX_CUSTOM_REGISTRIES", 1):
@@ -324,7 +290,7 @@ class CustomRegistryTests(unittest.TestCase):
             with patch.object(main, "fetch_remote_registry", fake_fetch({REMOTE_REGISTRY_URL: URLError("offline"), CUSTOM_URL: URLError("offline")})):
                 apps = plugin._load_registry()
             self.assertEqual(apps[-1]["repo"], "owner/cached")
-            self.assertEqual(len(apps), len(parse_registry(json.loads((ROOT / "registry" / "apps.json").read_text(encoding="utf-8")), allow_commands=True)) + 1)
+            self.assertEqual(len(apps), len(parse_registry(json.loads((ROOT / "registry" / "apps.json").read_text(encoding="utf-8")))) + 1)
 
     def test_a_broken_custom_registry_is_skipped_not_fatal(self):
         with tempfile.TemporaryDirectory() as home:
@@ -349,18 +315,6 @@ class CustomRegistryTests(unittest.TestCase):
             with patch.object(main, "fetch_remote_registry", fake_fetch({REMOTE_REGISTRY_URL: payload()})):
                 self.assertEqual([app["repo"] for app in plugin._load_registry()], ["owner/official"])
             self.assertEqual(json.loads(cache.read_text(encoding="utf-8")), payload("owner/official"))
-
-    def test_downloaded_registries_cannot_run_commands(self):
-        data = payload("owner/tool")
-        data["apps"][0]["detect"] = {"command": "bash", "args": ["-c", "echo pwned"]}
-        self.assertEqual(parse_registry(data), [])
-        self.assertEqual(len(parse_registry(data, allow_commands=True)), 1)
-        with tempfile.TemporaryDirectory() as home:
-            plugin = self.plugin(home, [CUSTOM_URL])
-            # The cache path re-parses too, so a poisoned cache file can't sneak one in.
-            self.seed_cache(plugin, CUSTOM_URL, data)
-            with patch.object(main, "fetch_remote_registry", fake_fetch({REMOTE_REGISTRY_URL: payload("owner/official"), CUSTOM_URL: URLError("offline")})):
-                self.assertEqual([app["repo"] for app in plugin._load_registry()], ["owner/official"])
 
     def test_malformed_entries_are_dropped_not_fatal(self):
         good = payload("owner/good")["apps"][0]
@@ -432,30 +386,6 @@ class CustomRegistryTests(unittest.TestCase):
             self.assertIsNone(main.REPOSITORY_NAME.fullmatch(repo), repo)
         for repo in ("owner/name", "o.w-n_er/na.me", "..a/b.."):
             self.assertIsNotNone(main.REPOSITORY_NAME.fullmatch(repo), repo)
-
-    def test_add_does_not_retry_an_http_status_or_a_bad_certificate(self):
-        from urllib.error import HTTPError
-
-        errors = (HTTPError(CUSTOM_URL, 404, "Not Found", {}, None), URLError(self._verified("certificate has expired")))
-        for error in errors:
-            with self.subTest(error=error), tempfile.TemporaryDirectory() as home:
-                plugin = self.plugin(home)
-                calls = []
-
-                def failing(url, *args, **kwargs):
-                    calls.append(url)
-                    raise error
-
-                with patch.object(main, "fetch_remote_registry", failing):
-                    self.assertFalse(asyncio.run(plugin.add_custom_registry(CUSTOM_URL))["added"])
-                self.assertEqual(len(calls), 1)
-
-    def test_add_refuses_other_spellings_of_the_official_url(self):
-        with tempfile.TemporaryDirectory() as home:
-            plugin = self.plugin(home)
-            for ref in ("HEAD", "main", "refs/heads/main"):
-                url = f"https://raw.githubusercontent.com/Mazillka/DeckyHub-Plugin/{ref}/registry/apps.json"
-                self.assertEqual(asyncio.run(plugin.add_custom_registry(url))["reason"], "official", url)
 
     def test_add_reports_only_the_apps_it_contributed(self):
         with tempfile.TemporaryDirectory() as home:

@@ -3,7 +3,8 @@ import { useEffect, useRef, useState } from "react";
 import { FaExternalLinkAlt, FaSync } from "react-icons/fa";
 import type { TFunc } from "../i18n/en";
 import type { UpdateChannel } from "../types";
-import { inChannel, modalButtonStyle, windowGap } from "../utils";
+import { modalButtonStyle, windowGap } from "../utils";
+import { inChannel } from "../version";
 import { keepInView } from "./KeepInView";
 
 // Shared by both version pickers: the channel's releases and the selected one.

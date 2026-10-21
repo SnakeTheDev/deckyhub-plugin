@@ -5,7 +5,8 @@ import { FaArrowCircleUp, FaSync } from "react-icons/fa";
 import { getDeckyHubInfo, getSettings } from "../api";
 import { useT } from "../i18n";
 import type { DeckyHubInfo, DeckyHubRelease, UpdateChannel } from "../types";
-import { compactButtonStyle, latestDeckyHubRelease, log, normalizeVersion, PLUGIN_INSTALL_TYPE, resolveDeckyHubInstallType } from "../utils";
+import { compactButtonStyle, latestDeckyHubRelease, log, PLUGIN_INSTALL_TYPE, resolveDeckyHubInstallType } from "../utils";
+import { normalizeVersion } from "../version";
 import { DeckyHubUpdateModal } from "./DeckyHubUpdateModal";
 import { KeepInView } from "./KeepInView";
 
